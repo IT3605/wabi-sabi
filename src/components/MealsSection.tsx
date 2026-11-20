@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { MEALS, type DishId } from '../data/meals';
 import { MealIllustration } from './Illustrations';
@@ -11,6 +12,8 @@ export function MealsSection({
   selectedDishId,
   onSelectDish,
 }: MealsSectionProps) {
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+
   return (
     <section id="meals" className="py-16 md:py-22">
       <div className="mx-auto max-w-[1180px] px-6">
@@ -30,15 +33,34 @@ export function MealsSection({
         <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
           {MEALS.map((meal) => {
             const isActive = meal.id === selectedDishId;
+            const hasFailed = Boolean(failedImages[meal.id]);
+
             return (
               <article
                 key={meal.id}
                 className="flex flex-col overflow-hidden rounded-[22px] border border-[#dce2d7] bg-white"
               >
                 <div
-                  className={`flex h-[210px] items-center justify-center bg-gradient-to-br ${meal.surfaceGradient} px-6`}
+                  className={`aspect-[4/3] w-full overflow-hidden bg-gradient-to-br ${meal.surfaceGradient}`}
                 >
-                  <MealIllustration dishId={meal.id} />
+                  {!hasFailed ? (
+                    <img
+                      src={meal.imageSrc}
+                      alt={meal.imageAlt}
+                      referrerPolicy="no-referrer"
+                      onError={() =>
+                        setFailedImages((prev) => ({
+                          ...prev,
+                          [meal.id]: true,
+                        }))
+                      }
+                      className="h-full w-full object-cover transition-transform duration-300 hover:scale-[1.03]"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center px-6">
+                      <MealIllustration dishId={meal.id} />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-1 flex-col justify-between p-6">

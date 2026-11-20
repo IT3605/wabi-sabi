@@ -1,13 +1,31 @@
+import { useState } from 'react';
 import { PhilosophyProduceIllustration } from './Illustrations';
 
+const STORY_IMAGE_SRC =
+  '/src/assets/images/story_imperfect_produce_1795162139578.jpg';
+
 export function PhilosophySection() {
+  const [imageError, setImageError] = useState(false);
+
   return (
     <section id="story" className="py-16 md:py-22">
       <div className="mx-auto max-w-[1180px] px-6">
         <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-12 lg:gap-14">
           <div className="lg:col-span-6">
-            <div className="flex min-h-[280px] items-center justify-center rounded-[24px] border border-[#dce2d7] bg-[#e2e8d8] p-8 md:min-h-[340px]">
-              <PhilosophyProduceIllustration />
+            <div className="aspect-[4/3] w-full overflow-hidden rounded-[24px] border border-[#dce2d7] bg-[#e2e8d8]">
+              {!imageError ? (
+                <img
+                  src={STORY_IMAGE_SRC}
+                  alt="A crooked organic heirloom carrot with leafy greens and a dimpled ripe heirloom tomato resting on natural beige linen"
+                  referrerPolicy="no-referrer"
+                  onError={() => setImageError(true)}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center p-8">
+                  <PhilosophyProduceIllustration />
+                </div>
+              )}
             </div>
           </div>
 

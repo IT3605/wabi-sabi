@@ -9,6 +9,8 @@ export interface MealOption {
   defaultSpice: string;
   defaultOil: string;
   surfaceGradient: string;
+  imageSrc: string;
+  imageAlt: string;
 }
 
 export interface AdjustmentChoice {
@@ -37,6 +39,9 @@ export const MEALS: MealOption[] = [
     defaultSpice: '0.5',
     defaultOil: '1.5',
     surfaceGradient: 'from-[#ebe0c8] to-[#f7f0df]',
+    imageSrc: '/src/assets/images/meal_curry_rice_1795162139662.jpg',
+    imageAlt:
+      'Homestyle Japanese-Singaporean curry rice with tender root vegetables and steamed rice in an off-white stoneware plate',
   },
   {
     id: 'garden-bowl',
@@ -48,6 +53,9 @@ export const MEALS: MealOption[] = [
     defaultSpice: '0',
     defaultOil: '1',
     surfaceGradient: 'from-[#d7e3d1] to-[#f4ead2]',
+    imageSrc: '/src/assets/images/meal_garden_bowl_1795162139204.jpg',
+    imageAlt:
+      'Garden Goodness harvest bowl with grains, charred greens, roasted sweet potato, sliced avocado, and heirloom cherry tomatoes',
   },
   {
     id: 'sweet-sour-noodles',
@@ -59,6 +67,9 @@ export const MEALS: MealOption[] = [
     defaultSpice: '0.25',
     defaultOil: '1.5',
     surfaceGradient: 'from-[#f0d9c2] to-[#eceee0]',
+    imageSrc: '/src/assets/images/meal_sweet_sour_noodles_1795162139183.jpg',
+    imageAlt:
+      'Homestyle sweet and sour stir-fried noodles with bell peppers, pineapple chunks, and scallions in a dark stoneware bowl',
   },
 ];
 
