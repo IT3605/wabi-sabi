@@ -1,0 +1,6 @@
+{
+  "name": "Wabi Sabi",
+  "description": "Personalised meals for busy Singaporeans. Your taste, your recipe, remembered.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
