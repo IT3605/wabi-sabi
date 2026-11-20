@@ -6,11 +6,13 @@ import { MealIllustration } from './Illustrations';
 interface MealsSectionProps {
   selectedDishId: DishId;
   onSelectDish: (dishId: DishId) => void;
+  onOrderDish: (dishId: DishId) => void;
 }
 
 export function MealsSection({
   selectedDishId,
   onSelectDish,
+  onOrderDish,
 }: MealsSectionProps) {
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
@@ -67,6 +69,7 @@ export function MealsSection({
                   <div>
                     <p className="text-[12px] font-medium text-[#5d6c60]">
                       {meal.subtitle}
+                      {isActive ? ' · Selected' : ''}
                     </p>
                     <h3 className="mt-2 text-[20px] font-semibold text-[#253a30]">
                       {meal.name}
@@ -76,17 +79,21 @@ export function MealsSection({
                     </p>
                   </div>
 
-                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-[#dce2d7] pt-4">
-                    <span className="text-[12px] font-medium text-[#5d6c60]">
-                      {isActive ? 'Currently in recipe card' : 'Ready to tailor'}
-                    </span>
-
+                  <div className="mt-6 flex items-center justify-between gap-2.5 border-t border-[#dce2d7] pt-4">
                     <button
                       type="button"
                       onClick={() => onSelectDish(meal.id)}
-                      className="inline-flex min-h-[40px] items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-full bg-[#253a30] px-4 py-2 text-[13px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
+                      className="inline-flex min-h-[40px] items-center justify-center whitespace-nowrap shrink-0 rounded-full border border-[#dce2d7] bg-[#fbf8f0] px-4 py-2 text-[13px] font-semibold text-[#253a30] transition-colors duration-150 hover:bg-[#e7ecdf] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
                     >
                       Personalise
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onOrderDish(meal.id)}
+                      className="inline-flex min-h-[40px] items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-full bg-[#253a30] px-4 py-2 text-[13px] font-semibold text-white tabular-nums transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
+                    >
+                      Order · {meal.priceLabel}
                       <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                   </div>

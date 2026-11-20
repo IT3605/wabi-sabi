@@ -4,7 +4,11 @@ import { HeroMealIllustration } from './Illustrations';
 
 const HERO_IMAGE_SRC = '/src/assets/images/hero_wabi_sabi_meal_1795162138881.jpg';
 
-export function Hero() {
+interface HeroProps {
+  onOpenOrder: () => void;
+}
+
+export function Hero({ onOpenOrder }: HeroProps) {
   const [imageError, setImageError] = useState(false);
 
   return (
@@ -29,19 +33,20 @@ export function Hero() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
-              href="#meals"
+            <button
+              type="button"
+              onClick={onOpenOrder}
               className="inline-flex min-h-[44px] items-center justify-center gap-2 whitespace-nowrap shrink-0 rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
             >
-              Explore the meals
+              Order food · $9.50
               <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-            </a>
+            </button>
 
             <a
-              href="#how"
+              href="#meals"
               className="inline-flex min-h-[44px] items-center justify-center whitespace-nowrap shrink-0 rounded-full border border-[#dce2d7] bg-white px-6 py-3 text-[15px] font-semibold text-[#253a30] transition-colors duration-150 hover:bg-[#e7ecdf] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
             >
-              How it works
+              Explore the meals
             </a>
           </div>
 

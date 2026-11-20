@@ -1,10 +1,18 @@
 export type DishId = 'curry-rice' | 'garden-bowl' | 'sweet-sour-noodles';
 
+export const MEAL_PRICE_CENTS = 950;
+
+export function formatPrice(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 export interface MealOption {
   id: DishId;
   name: string;
   subtitle: string;
   description: string;
+  priceCents: number;
+  priceLabel: string;
   defaultSugar: string;
   defaultSpice: string;
   defaultOil: string;
@@ -35,6 +43,8 @@ export const MEALS: MealOption[] = [
     subtitle: 'Customisable · Comfort classic',
     description:
       'Comforting, aromatic, and tailored to your preferred spice level.',
+    priceCents: MEAL_PRICE_CENTS,
+    priceLabel: formatPrice(MEAL_PRICE_CENTS),
     defaultSugar: '1.5',
     defaultSpice: '0.5',
     defaultOil: '1.5',
@@ -49,6 +59,8 @@ export const MEALS: MealOption[] = [
     subtitle: 'Customisable · Seasonal harvest',
     description:
       'Seasonal vegetables, grains, and a dressing balanced to your taste.',
+    priceCents: MEAL_PRICE_CENTS,
+    priceLabel: formatPrice(MEAL_PRICE_CENTS),
     defaultSugar: '1.5',
     defaultSpice: '0',
     defaultOil: '1',
@@ -63,6 +75,8 @@ export const MEALS: MealOption[] = [
     subtitle: 'Customisable · Signature favourite',
     description:
       'A familiar favourite with your ideal balance of sweetness and tang.',
+    priceCents: MEAL_PRICE_CENTS,
+    priceLabel: formatPrice(MEAL_PRICE_CENTS),
     defaultSugar: '1.5',
     defaultSpice: '0.25',
     defaultOil: '1.5',
@@ -102,3 +116,6 @@ export function formatTsp(value: string): string {
 }
 
 export const STORAGE_KEY = 'wabisabi-demo-recipe';
+export const CUSTOMER_PROFILE_STORAGE_KEY = 'wabisabi-customer-profile';
+export const CUSTOMER_RECIPES_STORAGE_KEY = 'wabisabi-customer-recipes';
+export const ORDERS_STORAGE_KEY = 'wabisabi-orders';

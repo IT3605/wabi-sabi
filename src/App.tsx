@@ -5,15 +5,23 @@ import { Hero } from './components/Hero';
 import { HowItWorks } from './components/HowItWorks';
 import { LaunchBanner } from './components/LaunchBanner';
 import { MealsSection } from './components/MealsSection';
+import { OrderModal } from './components/OrderModal';
 import { PhilosophySection } from './components/PhilosophySection';
 import { RecipePersonaliser } from './components/RecipePersonaliser';
 import { Toast } from './components/Toast';
 import {
   MEALS,
   STORAGE_KEY,
+  formatPrice,
   type DishId,
   type RecipeState,
 } from './data/meals';
+import {
+  getSavedCustomerProfile,
+  recallCustomerData,
+  saveRememberedRecipe,
+  type OrderRecord,
+} from './lib/ordersRepository';
 
 const DEFAULT_MEAL = MEALS[2]; // Sweet & Sour Noodles
 
@@ -55,6 +63,10 @@ function getInitialRecipe(): RecipeState {
 
 export default function App() {
   const [recipe, setRecipe] = useState<RecipeState>(getInitialRecipe);
+  const [rememberedByDish, setRememberedByDish] = useState<
+    Partial<Record<DishId, RecipeState>>
+  >({});
+  const [isOrderOpen, setIsOrderOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -76,37 +88,62 @@ export default function App() {
     };
   }, []);
 
-  const handleSelectDishFromMenu = (dishId: DishId) => {
+  useEffect(() => {
+    const savedProfile = getSavedCustomerProfile();
+    if (!savedProfile?.contact) return;
+
+    let cancelled = false;
+    recallCustomerData(savedProfile.contact)
+      .then(({ recipesByDish }) => {
+        if (cancelled || !recipesByDish) return;
+        setRememberedByDish(recipesByDish);
+        setRecipe((prev) => recipesByDish[prev.dishId] ?? prev);
+      })
+      .catch(() => {
+        // Silently keep local fallback recipe if remote recall fails
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectDishState = (dishId: DishId) => {
+    const remembered = rememberedByDish[dishId];
+    if (remembered) {
+      setRecipe(remembered);
+      return;
+    }
+
     const meal = MEALS.find((m) => m.id === dishId);
     if (!meal) return;
 
-    setRecipe((prev) => ({
-      ...prev,
+    setRecipe({
       dishId: meal.id,
       dishName: meal.name,
       sugar: meal.defaultSugar,
       spice: meal.defaultSpice,
       oil: meal.defaultOil,
-    }));
+      version: 1,
+    });
+  };
 
+  const handleSelectDishFromMenu = (dishId: DishId) => {
+    const meal = MEALS.find((m) => m.id === dishId);
+    if (!meal) return;
+
+    selectDishState(dishId);
     document
       .getElementById('personalise')
       ?.scrollIntoView({ behavior: 'smooth' });
     notify(`Now customising: ${meal.name}`);
   };
 
-  const handleChangeDishTab = (dishId: DishId) => {
-    const meal = MEALS.find((m) => m.id === dishId);
-    if (!meal) return;
-
-    setRecipe((prev) => ({
-      ...prev,
-      dishId: meal.id,
-      dishName: meal.name,
-      sugar: meal.defaultSugar,
-      spice: meal.defaultSpice,
-      oil: meal.defaultOil,
-    }));
+  const handleOrderDish = (dishId: DishId) => {
+    if (dishId !== recipe.dishId) {
+      selectDishState(dishId);
+    }
+    setIsOrderOpen(true);
   };
 
   const handleUpdateField = (
@@ -119,12 +156,35 @@ export default function App() {
     }));
   };
 
-  const handleSaveRecipe = () => {
+  const handleSaveRecipe = async () => {
+    const savedProfile = getSavedCustomerProfile();
+    if (savedProfile?.contact) {
+      try {
+        const updated = await saveRememberedRecipe(savedProfile, recipe);
+        setRecipe(updated);
+        setRememberedByDish((prev) => ({
+          ...prev,
+          [updated.dishId]: updated,
+        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        notify(
+          `Saved ${updated.dishName} (Version ${updated.version}) for future orders.`
+        );
+        return;
+      } catch {
+        // Fallback to local save below
+      }
+    }
+
     const nextRecipe: RecipeState = {
       ...recipe,
       version: recipe.version + 1,
     };
     setRecipe(nextRecipe);
+    setRememberedByDish((prev) => ({
+      ...prev,
+      [nextRecipe.dishId]: nextRecipe,
+    }));
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextRecipe));
@@ -155,6 +215,22 @@ export default function App() {
     notify(`Reset ${meal.name} to standard recipe quantities.`);
   };
 
+  const handleOrderConfirmed = (order: OrderRecord) => {
+    setRecipe(order.recipe);
+    setRememberedByDish((prev) => ({
+      ...prev,
+      [order.recipe.dishId]: order.recipe,
+    }));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(order.recipe));
+    } catch {
+      // Ignore storage errors
+    }
+    notify(
+      `Order saved: ${order.quantity} × ${order.recipe.dishName} (${formatPrice(order.totalCents)}).`
+    );
+  };
+
   const handleLaunchInterest = () => {
     notify(
       'Launch sign-up will open soon. Contact details are not yet configured.'
@@ -163,27 +239,49 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#fbf8f0] text-[#253a30]">
-      <Header />
+      <Header onOpenOrder={() => setIsOrderOpen(true)} />
 
       <main>
-        <Hero />
+        <Hero onOpenOrder={() => setIsOrderOpen(true)} />
         <HowItWorks />
         <MealsSection
           selectedDishId={recipe.dishId}
           onSelectDish={handleSelectDishFromMenu}
+          onOrderDish={handleOrderDish}
         />
         <RecipePersonaliser
           recipe={recipe}
-          onChangeDish={handleChangeDishTab}
+          onChangeDish={selectDishState}
           onUpdateField={handleUpdateField}
           onSaveRecipe={handleSaveRecipe}
           onResetRecipe={handleResetRecipe}
+          onOrderRecipe={() => setIsOrderOpen(true)}
         />
         <PhilosophySection />
         <LaunchBanner onLaunchInterest={handleLaunchInterest} />
       </main>
 
       <Footer />
+
+      <OrderModal
+        isOpen={isOrderOpen}
+        recipe={recipe}
+        onClose={() => setIsOrderOpen(false)}
+        onSelectDish={selectDishState}
+        onRecipeRecalled={(recalled) => {
+          setRecipe(recalled);
+          setRememberedByDish((prev) => ({
+            ...prev,
+            [recalled.dishId]: recalled,
+          }));
+        }}
+        onJumpToPersonalise={() => {
+          document
+            .getElementById('personalise')
+            ?.scrollIntoView({ behavior: 'smooth' });
+        }}
+        onOrderConfirmed={handleOrderConfirmed}
+      />
 
       <Toast
         message={toastMessage}

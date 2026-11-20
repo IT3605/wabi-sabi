@@ -8,7 +8,11 @@ const NAV_LINKS = [
   { href: '#story', label: 'Our philosophy' },
 ];
 
-export function Header() {
+interface HeaderProps {
+  onOpenOrder: () => void;
+}
+
+export function Header({ onOpenOrder }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -40,13 +44,14 @@ export function Header() {
 
         {/* Zone 3: Single primary action on desktop, menu toggle on mobile */}
         <div className="flex shrink-0 items-center gap-3">
-          <a
-            href="#personalise"
+          <button
+            type="button"
+            onClick={onOpenOrder}
             className="hidden min-h-[40px] items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-full bg-[#253a30] px-5 py-2 text-[13px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30] sm:inline-flex"
           >
-            Make it yours
+            Order food · $9.50
             <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </a>
+          </button>
 
           <button
             type="button"
@@ -81,14 +86,17 @@ export function Header() {
                 {link.label}
               </a>
             ))}
-            <a
-              href="#personalise"
-              onClick={() => setMenuOpen(false)}
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenOrder();
+              }}
               className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-[#253a30] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#3a594a]"
             >
-              Make it yours
+              Order food · $9.50
               <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-            </a>
+            </button>
           </div>
         </nav>
       )}

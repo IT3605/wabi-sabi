@@ -15,6 +15,7 @@ interface RecipePersonaliserProps {
   onUpdateField: (field: 'sugar' | 'spice' | 'oil', value: string) => void;
   onSaveRecipe: () => void;
   onResetRecipe: () => void;
+  onOrderRecipe: () => void;
 }
 
 export function RecipePersonaliser({
@@ -23,6 +24,7 @@ export function RecipePersonaliser({
   onUpdateField,
   onSaveRecipe,
   onResetRecipe,
+  onOrderRecipe,
 }: RecipePersonaliserProps) {
   return (
     <section id="personalise" className="bg-[#eef0e7] py-16 md:py-22">
@@ -175,14 +177,24 @@ export function RecipePersonaliser({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={onSaveRecipe}
-                className="mt-5 inline-flex min-h-[44px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
-              >
-                Save my recipe
-                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-              </button>
+              <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={onOrderRecipe}
+                  className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
+                >
+                  Order food · $9.50
+                  <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onSaveRecipe}
+                  className="inline-flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-full border border-[#dce2d7] bg-[#fbf8f0] px-5 py-3 text-[14px] font-semibold text-[#253a30] transition-colors duration-150 hover:bg-[#e7ecdf] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
+                >
+                  Save my recipe
+                </button>
+              </div>
 
               <p className="mt-3 text-[12px] text-[#5d6c60]">
                 Demo only: saving stores this sample in your browser, not a
