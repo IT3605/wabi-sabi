@@ -78,11 +78,23 @@ create table if not exists public.orders (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.launch_list (
+  id bigint generated always as identity primary key,
+  name text not null check (char_length(trim(name)) between 1 and 100),
+  contact text not null unique check (char_length(trim(contact)) between 5 and 160),
+  display_contact text not null check (char_length(trim(display_contact)) between 5 and 160),
+  neighbourhood text not null default '' check (char_length(neighbourhood) <= 80),
+  preferred_dish_id text references public.menu_prices(dish_id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists idx_customers_contact on public.customers(contact);
 create index if not exists idx_recipes_customer on public.recipes(customer_id, dish_id);
 create index if not exists idx_tweaks_customer on public.recipe_tweaks(customer_id, dish_id, id desc);
 create index if not exists idx_orders_customer on public.orders(customer_id, id desc);
 create index if not exists idx_orders_code on public.orders(order_code);
+create index if not exists idx_launch_list_contact on public.launch_list(contact);
 
 -- ---------------------------------------------------------------------------
 -- 2. Database Security: Row-Level Security (RLS) & Least Privilege Grants
@@ -95,11 +107,13 @@ alter table public.customers enable row level security;
 alter table public.recipes enable row level security;
 alter table public.recipe_tweaks enable row level security;
 alter table public.orders enable row level security;
+alter table public.launch_list enable row level security;
 
 revoke all on table public.customers from anon, authenticated;
 revoke all on table public.recipes from anon, authenticated;
 revoke all on table public.recipe_tweaks from anon, authenticated;
 revoke all on table public.orders from anon, authenticated;
+revoke all on table public.launch_list from anon, authenticated;
 revoke insert, update, delete on table public.menu_prices from anon, authenticated;
 grant select on table public.menu_prices to anon, authenticated;
 
@@ -201,3 +215,10 @@ select
   'stripe_demo', 'paid'
 from public.customers c where c.contact = '+6591234567'
 on conflict (order_code) do nothing;
+
+-- Sample launch list entries
+insert into public.launch_list (name, contact, display_contact, neighbourhood, preferred_dish_id)
+values
+  ('Wei Ming Tan', 'weiming@example.sg', 'weiming@example.sg', 'Tiong Bahru', 'curry-rice'),
+  ('Aisyah Rahman', '+6591234567', '+65 9123 4567', 'Marine Parade', 'garden-bowl')
+on conflict (contact) do nothing;

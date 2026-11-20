@@ -399,3 +399,43 @@ export async function verifyStripeSession(
     order: data.order ? mapOrder(data.order, fallback) : null,
   };
 }
+
+export interface LaunchListEntry {
+  id: number;
+  name: string;
+  contact: string;
+  neighbourhood: string;
+  preferredDishId: string | null;
+  createdAt: string;
+}
+
+export async function joinLaunchList(input: {
+  name: string;
+  contact: string;
+  neighbourhood: string;
+  preferredDishId?: DishId;
+}): Promise<{ alreadyRegistered: boolean; entry: LaunchListEntry }> {
+  const response = await fetch('/api/launch-list', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  const data = (await response.json()) as {
+    error?: string;
+    joined?: boolean;
+    alreadyRegistered?: boolean;
+    entry?: LaunchListEntry;
+  };
+
+  if (!response.ok || !data.entry) {
+    throw new Error(data.error ?? 'Could not join the launch list right now.');
+  }
+
+  return {
+    alreadyRegistered: Boolean(data.alreadyRegistered),
+    entry: data.entry,
+  };
+}
+

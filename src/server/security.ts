@@ -127,6 +127,20 @@ export const stripeVerifyQuerySchema = z.object({
   order_code: orderCodeSchema,
 });
 
+export const launchListPayloadSchema = z.object({
+  name: z
+    .string()
+    .transform((v) => sanitizePlainText(v, 100))
+    .refine((v) => v.length >= 1, 'Please enter your name.'),
+  contact: contactSchema,
+  neighbourhood: z
+    .string()
+    .optional()
+    .default('')
+    .transform((v) => sanitizePlainText(v, 80)),
+  preferredDishId: dishIdSchema.optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Signed HttpOnly Session Cookie (protects customer PII from enumeration)
 // ---------------------------------------------------------------------------

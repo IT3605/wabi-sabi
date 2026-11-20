@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  ArrowLeft,
   Check,
-  CreditCard,
   ExternalLink,
   Minus,
   Plus,
@@ -18,7 +16,6 @@ import {
   type RecipeState,
 } from '../data/meals';
 import {
-  confirmDemoStripePayment,
   createCheckoutOrder,
   getSavedCustomerProfile,
   recallCustomerData,
@@ -56,7 +53,7 @@ const DELIVERY_SLOTS = [
   'Tomorrow · Dinner (18:30 – 19:30)',
 ];
 
-type ModalStep = 'details' | 'stripe_redirect' | 'stripe_demo' | 'confirmed';
+type ModalStep = 'details' | 'stripe_redirect' | 'confirmed';
 
 export function OrderModal({
   isOpen,
@@ -84,25 +81,20 @@ export function OrderModal({
     contact?: string;
     address?: string;
     postal?: string;
-    card?: string;
     submit?: string;
   }>({});
   const [recallFeedback, setRecallFeedback] = useState<string | null>(null);
   const [isRecalling, setIsRecalling] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Stripe state
+  // Stripe redirect state (used only when live STRIPE_SECRET_KEY is configured)
   const [pendingOrder, setPendingOrder] = useState<OrderRecord | null>(null);
   const [stripeCheckoutUrl, setStripeCheckoutUrl] = useState<string | null>(
     null
   );
-  const [cardNumber, setCardNumber] = useState('4242 4242 4242 4242');
-  const [cardExpiry, setCardExpiry] = useState('12/28');
-  const [cardCvc, setCardCvc] = useState('424');
   const [confirmedOrder, setConfirmedOrder] = useState<OrderRecord | null>(
     null
   );
-  const [pastOrders, setPastOrders] = useState<OrderRecord[]>([]);
   const [imageError, setImageError] = useState(false);
 
   const selectedMeal = meals.find((m) => m.id === recipe.dishId) ?? meals[0];
@@ -175,7 +167,6 @@ export function OrderModal({
         setPostalCode(result.profile.postalCode);
       }
 
-      setPastOrders(result.orders);
       onCustomerLoaded({
         recipesByDish: result.recipesByDish,
         tweaks: result.tweaks,
@@ -259,7 +250,6 @@ export function OrderModal({
       });
 
       setPendingOrder(result.order);
-      setPastOrders(result.orders);
       onOrderCompleted({
         order: result.order,
         recipe: result.recipe,
@@ -275,56 +265,15 @@ export function OrderModal({
         }
         setStep('stripe_redirect');
       } else {
-        setStep('stripe_demo');
+        setConfirmedOrder(result.order);
+        setStep('confirmed');
       }
     } catch (err) {
       setErrors({
         submit:
           err instanceof Error
             ? err.message
-            : 'Unable to initiate checkout right now.',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleConfirmDemoPayment = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!pendingOrder) return;
-
-    const cleanCard = cardNumber.replace(/\s+/g, '');
-    if (cleanCard.length < 13 || !/^\d+$/.test(cleanCard)) {
-      setErrors({ card: 'Enter a valid test card number (e.g. 4242 4242 4242 4242).' });
-      return;
-    }
-    if (!/^\d{2}\/\d{2}$/.test(cardExpiry.trim()) || cardCvc.trim().length < 3) {
-      setErrors({ card: 'Enter valid expiry (MM/YY) and 3-digit CVC.' });
-      return;
-    }
-
-    setErrors({});
-    setIsSubmitting(true);
-
-    try {
-      const paidOrder = await confirmDemoStripePayment(
-        pendingOrder.orderCode,
-        pendingOrder.customer
-      );
-      setConfirmedOrder(paidOrder);
-      setStep('confirmed');
-      onOrderCompleted({
-        order: paidOrder,
-        recipe: paidOrder.recipe,
-        tweaks: [],
-        orders: pastOrders.map((o) =>
-          o.orderCode === paidOrder.orderCode ? paidOrder : o
-        ),
-      });
-    } catch (err) {
-      setErrors({
-        card:
-          err instanceof Error ? err.message : 'Unable to process payment.',
+            : 'Unable to place your order right now.',
       });
     } finally {
       setIsSubmitting(false);
@@ -356,8 +305,10 @@ export function OrderModal({
               className="mt-1 font-serif text-[28px] leading-tight font-semibold text-[#253a30]"
             >
               {step === 'confirmed'
-                ? 'Payment confirmed'
-                : step === 'stripe_demo' || step === 'stripe_redirect'
+                ? confirmedOrder?.paymentStatus === 'paid'
+                  ? 'Payment confirmed'
+                  : 'Order confirmed'
+                : step === 'stripe_redirect'
                   ? 'Pay with Stripe'
                   : 'Order your meal'}
             </h2>
@@ -386,8 +337,11 @@ export function OrderModal({
                       {confirmedOrder.quantity} × {confirmedOrder.recipe.dishName}
                     </p>
                     <p className="text-[13px] text-[#5d6c60]">
-                      Order {confirmedOrder.orderCode} · Paid via Stripe ·{' '}
-                      {confirmedOrder.deliverySlot}
+                      Order {confirmedOrder.orderCode} ·{' '}
+                      {confirmedOrder.paymentStatus === 'paid'
+                        ? 'Paid via Stripe'
+                        : 'Payment deferred (Stripe KIV)'}{' '}
+                      · {confirmedOrder.deliverySlot}
                     </p>
                   </div>
                 </div>
@@ -465,101 +419,6 @@ export function OrderModal({
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
             </a>
           </div>
-        ) : step === 'stripe_demo' && pendingOrder ? (
-          <form
-            onSubmit={handleConfirmDemoPayment}
-            noValidate
-            className="mt-6 space-y-5"
-          >
-            <div className="rounded-2xl border border-[#dce2d7] bg-white p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[14px] font-semibold text-[#253a30]">
-                    {pendingOrder.quantity} × {pendingOrder.recipe.dishName}
-                  </p>
-                  <p className="mt-0.5 text-[12px] text-[#5d6c60]">
-                    Order {pendingOrder.orderCode} · Recipe v
-                    {pendingOrder.recipe.version}
-                  </p>
-                </div>
-                <span className="text-[18px] font-semibold text-[#253a30] tabular-nums">
-                  {formatPrice(pendingOrder.totalCents)}
-                </span>
-              </div>
-
-              <div className="mt-5 space-y-3 border-t border-[#dce2d7] pt-4">
-                <div className="flex items-center gap-2 text-[13px] font-semibold text-[#253a30]">
-                  <CreditCard className="h-4 w-4" aria-hidden="true" />
-                  <span>Stripe card checkout (Test mode)</span>
-                </div>
-
-                <label className="block text-[12px] font-medium text-[#5d6c60]">
-                  Card number
-                  <input
-                    type="text"
-                    value={cardNumber}
-                    onChange={(e) => setCardNumber(e.target.value)}
-                    className="mt-1 min-h-[42px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] text-[#253a30] tabular-nums focus:border-[#253a30] focus:outline-none"
-                  />
-                </label>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block text-[12px] font-medium text-[#5d6c60]">
-                    Expiry (MM/YY)
-                    <input
-                      type="text"
-                      value={cardExpiry}
-                      onChange={(e) => setCardExpiry(e.target.value)}
-                      className="mt-1 min-h-[42px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] text-[#253a30] tabular-nums focus:border-[#253a30] focus:outline-none"
-                    />
-                  </label>
-
-                  <label className="block text-[12px] font-medium text-[#5d6c60]">
-                    CVC
-                    <input
-                      type="text"
-                      maxLength={4}
-                      value={cardCvc}
-                      onChange={(e) => setCardCvc(e.target.value)}
-                      className="mt-1 min-h-[42px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] text-[#253a30] tabular-nums focus:border-[#253a30] focus:outline-none"
-                    />
-                  </label>
-                </div>
-
-                {errors.card && (
-                  <p className="text-[12px] font-medium text-[#9d5738]">
-                    {errors.card}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2.5 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => setStep('details')}
-                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-[#dce2d7] bg-white px-5 py-3 text-[14px] font-semibold text-[#253a30] transition-colors hover:bg-[#e7ecdf]"
-              >
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Back
-              </button>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white tabular-nums transition-colors hover:bg-[#3a594a] disabled:opacity-60"
-              >
-                {isSubmitting
-                  ? 'Confirming payment...'
-                  : `Pay ${formatPrice(pendingOrder.totalCents)} with Stripe`}
-              </button>
-            </div>
-
-            <p className="text-center text-[12px] text-[#5d6c60]">
-              Running in Stripe test-card preview mode. Add `STRIPE_SECRET_KEY`
-              in your server environment for live Stripe Checkout Sessions.
-            </p>
-          </form>
         ) : (
           <form
             onSubmit={handleCheckoutSubmit}
@@ -808,8 +667,8 @@ export function OrderModal({
                 className="inline-flex min-h-[44px] w-full items-center justify-center rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white tabular-nums transition-colors duration-150 hover:bg-[#3a594a] disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
               >
                 {isSubmitting
-                  ? 'Saving order...'
-                  : `Continue to Stripe · ${formatPrice(totalCents)}`}
+                  ? 'Placing order...'
+                  : `Place order · ${formatPrice(totalCents)}`}
               </button>
               <p className="mt-2.5 text-center text-[12px] text-[#5d6c60]">
                 Saves your contact, order, and tailored recipe tweaks for future

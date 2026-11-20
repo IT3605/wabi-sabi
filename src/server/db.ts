@@ -74,6 +74,17 @@ export interface OrderRow {
   created_at: string;
 }
 
+export interface LaunchListRow {
+  id: number;
+  name: string;
+  contact: string;
+  display_contact: string;
+  neighbourhood: string;
+  preferred_dish_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DatabaseHealthReport {
   engine: 'supabase' | 'sqlite';
   connected: boolean;
@@ -83,6 +94,7 @@ export interface DatabaseHealthReport {
     recipes: number;
     recipe_tweaks: number;
     orders: number;
+    launch_list: number;
   };
 }
 
@@ -265,10 +277,22 @@ function getSqlite(): DatabaseSync {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS launch_list (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      contact TEXT NOT NULL UNIQUE,
+      display_contact TEXT NOT NULL,
+      neighbourhood TEXT NOT NULL DEFAULT '',
+      preferred_dish_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_customers_contact ON customers(contact);
     CREATE INDEX IF NOT EXISTS idx_recipes_customer ON recipes(customer_id, dish_id);
     CREATE INDEX IF NOT EXISTS idx_tweaks_customer ON recipe_tweaks(customer_id, dish_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_launch_list_contact ON launch_list(contact);
   `);
 
   const now = new Date().toISOString();
@@ -366,6 +390,20 @@ function getSqlite(): DatabaseSync {
         ('WS-1042', ?, 'curry-rice', 'Homestyle Curry Rice', 2, 1050, 2100, 1.5, 1.0, 1.0, 2, 'Today · Dinner (18:30 – 19:30)', 'Leave at shoe rack', 'stripe_demo', 'paid', ?),
         ('WS-1043', ?, 'garden-bowl', 'Garden Goodness Bowl', 1, 950, 950, 1.0, 0.0, 1.0, 1, 'Tomorrow · Lunch (12:00 – 13:00)', 'Ring doorbell once', 'stripe_demo', 'paid', ?)`
     ).run(c1Id, now, c2Id, now);
+  }
+
+  const launchCount = (
+    db.prepare('SELECT COUNT(*) AS cnt FROM launch_list').get() as {
+      cnt: number;
+    }
+  ).cnt;
+  if (launchCount === 0) {
+    db.prepare(
+      `INSERT OR IGNORE INTO launch_list (name, contact, display_contact, neighbourhood, preferred_dish_id, created_at, updated_at)
+       VALUES
+         ('Wei Ming Tan', 'weiming@example.sg', 'weiming@example.sg', 'Tiong Bahru', 'curry-rice', ?, ?),
+         ('Aisyah Rahman', '+6591234567', '+65 9123 4567', 'Marine Parade', 'garden-bowl', ?, ?)`
+    ).run(now, now, now, now);
   }
 
   sqliteDb = db;
@@ -1106,29 +1144,129 @@ export async function getOrderByCode(orderCode: string): Promise<
   return row ?? null;
 }
 
+export async function upsertLaunchListEntry(input: {
+  name: string;
+  contact: string;
+  neighbourhood: string;
+  preferredDishId?: string;
+}): Promise<{ entry: LaunchListRow; alreadyRegistered: boolean }> {
+  const normalized = normalizeContact(input.contact);
+  const now = new Date().toISOString();
+  const preferredDish = input.preferredDishId?.trim() || null;
+
+  const supabase = getSupabaseAdmin();
+  if (supabase) {
+    const { data: existing, error: findErr } = await supabase
+      .from('launch_list')
+      .select('*')
+      .eq('contact', normalized)
+      .maybeSingle();
+
+    if (findErr) {
+      throw new Error(`Supabase launch_list lookup error: ${findErr.message}`);
+    }
+
+    const { data: saved, error: upsertErr } = await supabase
+      .from('launch_list')
+      .upsert(
+        {
+          name: input.name.trim(),
+          contact: normalized,
+          display_contact: input.contact.trim(),
+          neighbourhood: input.neighbourhood.trim(),
+          preferred_dish_id: preferredDish,
+          updated_at: now,
+        },
+        { onConflict: 'contact' }
+      )
+      .select('*')
+      .single();
+
+    if (upsertErr || !saved) {
+      throw new Error(
+        `Supabase launch_list save error: ${upsertErr?.message ?? 'missing'}`
+      );
+    }
+
+    return {
+      entry: saved as LaunchListRow,
+      alreadyRegistered: Boolean(existing),
+    };
+  }
+
+  const db = getSqlite();
+  const existing = db
+    .prepare('SELECT * FROM launch_list WHERE contact = ?')
+    .get(normalized) as LaunchListRow | undefined;
+
+  if (existing) {
+    db.prepare(
+      `UPDATE launch_list
+       SET name = ?, display_contact = ?, neighbourhood = ?, preferred_dish_id = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      input.name.trim(),
+      input.contact.trim(),
+      input.neighbourhood.trim(),
+      preferredDish,
+      now,
+      existing.id
+    );
+    const updated = db
+      .prepare('SELECT * FROM launch_list WHERE id = ?')
+      .get(existing.id) as unknown as LaunchListRow;
+    return { entry: updated, alreadyRegistered: true };
+  }
+
+  const info = db
+    .prepare(
+      `INSERT INTO launch_list (name, contact, display_contact, neighbourhood, preferred_dish_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.name.trim(),
+      normalized,
+      input.contact.trim(),
+      input.neighbourhood.trim(),
+      preferredDish,
+      now,
+      now
+    );
+
+  const created = db
+    .prepare('SELECT * FROM launch_list WHERE id = ?')
+    .get(Number(info.lastInsertRowid)) as unknown as LaunchListRow;
+  return { entry: created, alreadyRegistered: false };
+}
+
 export async function testDatabaseConnection(): Promise<DatabaseHealthReport> {
   const supabase = getSupabaseAdmin();
   if (supabase) {
-    const [menuRes, custRes, recRes, tweakRes, ordRes] = await Promise.all([
-      supabase
-        .from('menu_prices')
-        .select('dish_id', { count: 'exact', head: true }),
-      supabase
-        .from('customers')
-        .select('id', { count: 'exact', head: true }),
-      supabase.from('recipes').select('id', { count: 'exact', head: true }),
-      supabase
-        .from('recipe_tweaks')
-        .select('id', { count: 'exact', head: true }),
-      supabase.from('orders').select('id', { count: 'exact', head: true }),
-    ]);
+    const [menuRes, custRes, recRes, tweakRes, ordRes, launchRes] =
+      await Promise.all([
+        supabase
+          .from('menu_prices')
+          .select('dish_id', { count: 'exact', head: true }),
+        supabase
+          .from('customers')
+          .select('id', { count: 'exact', head: true }),
+        supabase.from('recipes').select('id', { count: 'exact', head: true }),
+        supabase
+          .from('recipe_tweaks')
+          .select('id', { count: 'exact', head: true }),
+        supabase.from('orders').select('id', { count: 'exact', head: true }),
+        supabase
+          .from('launch_list')
+          .select('id', { count: 'exact', head: true }),
+      ]);
 
     const firstError =
       menuRes.error ||
       custRes.error ||
       recRes.error ||
       tweakRes.error ||
-      ordRes.error;
+      ordRes.error ||
+      launchRes.error;
     if (firstError) {
       throw new Error(`Supabase health check failed: ${firstError.message}`);
     }
@@ -1142,6 +1280,7 @@ export async function testDatabaseConnection(): Promise<DatabaseHealthReport> {
         recipes: recRes.count ?? 0,
         recipe_tweaks: tweakRes.count ?? 0,
         orders: ordRes.count ?? 0,
+        launch_list: launchRes.count ?? 0,
       },
     };
   }
@@ -1163,6 +1302,7 @@ export async function testDatabaseConnection(): Promise<DatabaseHealthReport> {
       recipes: countOf('recipes'),
       recipe_tweaks: countOf('recipe_tweaks'),
       orders: countOf('orders'),
+      launch_list: countOf('launch_list'),
     },
   };
 }

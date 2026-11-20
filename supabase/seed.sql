@@ -9,7 +9,9 @@ select 'recipes', count(*) from public.recipes
 union all
 select 'recipe_tweaks', count(*) from public.recipe_tweaks
 union all
-select 'orders', count(*) from public.orders;
+select 'orders', count(*) from public.orders
+union all
+select 'launch_list', count(*) from public.launch_list;
 
 -- Preview joined customer orders & recipes
 select

@@ -282,11 +282,12 @@ export default function App() {
     notify(`Reset ${meal.name} to standard recipe quantities.`);
   };
 
-  const handleLaunchInterest = () => {
-    notify(
-      'Launch sign-up will open soon. Contact details are not yet configured.'
-    );
-  };
+  const handleLaunchJoined = useCallback(
+    (message: string) => {
+      notify(message);
+    },
+    [notify]
+  );
 
   return (
     <div className="min-h-screen bg-[#fbf8f0] text-[#253a30]">
@@ -329,7 +330,11 @@ export default function App() {
           }}
         />
         <PhilosophySection />
-        <LaunchBanner onLaunchInterest={handleLaunchInterest} />
+        <LaunchBanner
+          preferredDishId={recipe.dishId}
+          preferredDishName={recipe.dishName}
+          onLaunchJoined={handleLaunchJoined}
+        />
       </main>
 
       <Footer />
@@ -377,6 +382,10 @@ export default function App() {
           if (order.paymentStatus === 'paid') {
             notify(
               `Order ${order.orderCode} paid (${formatPrice(order.totalCents)}). Recipe v${savedRecipe.version} saved.`
+            );
+          } else {
+            notify(
+              `Order ${order.orderCode} placed (${formatPrice(order.totalCents)}). Recipe v${savedRecipe.version} saved.`
             );
           }
         }}

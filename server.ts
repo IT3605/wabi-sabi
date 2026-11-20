@@ -22,6 +22,7 @@ import {
   saveRecipeWithTweak,
   testDatabaseConnection,
   upsertCustomer,
+  upsertLaunchListEntry,
 } from './src/server/db.ts';
 import {
   checkoutPayloadSchema,
@@ -29,6 +30,7 @@ import {
   createRateLimiter,
   isTrustedHost,
   issueCustomerSessionCookie,
+  launchListPayloadSchema,
   orderCodeSchema,
   readVerifiedCustomerContact,
   requireJsonContentType,
@@ -201,6 +203,14 @@ function createApiApp(): Hono {
       keyPrefix: 'api-customers',
     })
   );
+  app.use(
+    '/api/launch-list',
+    createRateLimiter({
+      windowMs: 60_000,
+      maxRequests: 15,
+      keyPrefix: 'api-launch-list',
+    })
+  );
 
   // Database connectivity & row-count check (returns no secrets or PII)
   app.get('/api/health/db', async (c) => {
@@ -212,6 +222,49 @@ function createApiApp(): Hono {
   app.get('/api/menu', async (c) => {
     const items = await getActiveMenuPrices();
     return c.json({ items });
+  });
+
+  // Singapore Launch List sign-up
+  app.post('/api/launch-list', requireJsonContentType, async (c) => {
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON request body.' }, 400);
+    }
+
+    const parsed = launchListPayloadSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error:
+            parsed.error.issues[0]?.message ??
+            'Please provide your name and a valid Singapore mobile or email.',
+        },
+        400
+      );
+    }
+
+    const data = parsed.data;
+    const { entry, alreadyRegistered } = await upsertLaunchListEntry({
+      name: data.name,
+      contact: data.contact,
+      neighbourhood: data.neighbourhood,
+      preferredDishId: data.preferredDishId,
+    });
+
+    return c.json({
+      joined: true,
+      alreadyRegistered,
+      entry: {
+        id: entry.id,
+        name: entry.name,
+        contact: entry.display_contact,
+        neighbourhood: entry.neighbourhood,
+        preferredDishId: entry.preferred_dish_id,
+        createdAt: entry.created_at,
+      },
+    });
   });
 
   // Recall customer profile & recipes (masks PII unless caller holds verified HttpOnly session cookie)
