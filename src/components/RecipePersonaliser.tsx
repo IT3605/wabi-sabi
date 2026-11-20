@@ -1,16 +1,21 @@
 import { ArrowUpRight, RotateCcw } from 'lucide-react';
 import {
-  MEALS,
   OIL_OPTIONS,
   SPICE_OPTIONS,
   SUGAR_OPTIONS,
   formatTsp,
   type DishId,
+  type MealOption,
   type RecipeState,
 } from '../data/meals';
+import type { RecipeTweakItem } from '../lib/ordersRepository';
 
 interface RecipePersonaliserProps {
+  meals: MealOption[];
   recipe: RecipeState;
+  tweakNote: string;
+  tweakHistory: RecipeTweakItem[];
+  onChangeTweakNote: (note: string) => void;
   onChangeDish: (dishId: DishId) => void;
   onUpdateField: (field: 'sugar' | 'spice' | 'oil', value: string) => void;
   onSaveRecipe: () => void;
@@ -19,13 +24,20 @@ interface RecipePersonaliserProps {
 }
 
 export function RecipePersonaliser({
+  meals,
   recipe,
+  tweakNote,
+  tweakHistory,
+  onChangeTweakNote,
   onChangeDish,
   onUpdateField,
   onSaveRecipe,
   onResetRecipe,
   onOrderRecipe,
 }: RecipePersonaliserProps) {
+  const dishTweaks = tweakHistory.filter((t) => t.dishId === recipe.dishId);
+  const activeMeal = meals.find((m) => m.id === recipe.dishId) ?? meals[0];
+
   return (
     <section id="personalise" className="bg-[#eef0e7] py-16 md:py-22">
       <div className="mx-auto max-w-[1180px] px-6">
@@ -50,14 +62,14 @@ export function RecipePersonaliser({
             {/* Interactive dish switcher */}
             <div className="mt-7">
               <p className="text-[12px] font-medium text-[#5d6c60]">
-                Select a sample dish to tailor
+                Select a dish to tailor
               </p>
               <div
                 className="mt-2.5 flex flex-wrap gap-1.5 rounded-xl border border-[#dce2d7] bg-[#fbf8f0] p-1.5"
                 role="tablist"
                 aria-label="Sample dishes"
               >
-                {MEALS.map((meal) => {
+                {meals.map((meal) => {
                   const active = meal.id === recipe.dishId;
                   return (
                     <button
@@ -66,13 +78,13 @@ export function RecipePersonaliser({
                       role="tab"
                       aria-selected={active}
                       onClick={() => onChangeDish(meal.id)}
-                      className={`min-h-[40px] flex-1 whitespace-nowrap rounded-lg px-3.5 py-2 text-[13px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30] ${
+                      className={`min-h-[40px] flex-1 whitespace-nowrap rounded-lg px-3.5 py-2 text-[13px] font-medium tabular-nums transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30] ${
                         active
                           ? 'bg-[#253a30] text-white'
                           : 'text-[#5d6c60] hover:bg-[#e7ecdf] hover:text-[#253a30]'
                       }`}
                     >
-                      {meal.name}
+                      {meal.name} · {meal.priceLabel}
                     </button>
                   );
                 })}
@@ -84,9 +96,9 @@ export function RecipePersonaliser({
             <div className="rounded-[24px] border border-[#dce2d7] bg-white p-7 shadow-[0_20px_50px_rgba(49,73,52,0.06)] md:p-8">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[12px] font-medium text-[#9d5738]">
-                    Your personal recipe · Demo · Version{' '}
-                    <span className="tabular-nums">{recipe.version}</span>
+                  <p className="text-[12px] font-medium text-[#9d5738] tabular-nums">
+                    Your personal recipe · Version {recipe.version} ·{' '}
+                    {activeMeal.priceLabel}
                   </p>
                   <h3 className="mt-1.5 font-serif text-[26px] leading-tight font-semibold text-[#253a30]">
                     {recipe.dishName}
@@ -149,9 +161,20 @@ export function RecipePersonaliser({
                     ))}
                   </select>
                 </label>
+
+                <label className="block py-4 text-[14px] font-medium text-[#253a30]">
+                  <span>Tweak note for our kitchen (optional)</span>
+                  <input
+                    type="text"
+                    value={tweakNote}
+                    onChange={(e) => onChangeTweakNote(e.target.value)}
+                    placeholder="e.g. Keep carrots crisp, lighter gravy"
+                    className="mt-2 min-h-[40px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] font-normal text-[#253a30] placeholder:text-[#5d6c60]/60 focus:border-[#253a30] focus:outline-none"
+                  />
+                </label>
               </div>
 
-              <div className="mt-4 rounded-xl bg-[#f1f3eb] p-4">
+              <div className="mt-2 rounded-xl bg-[#f1f3eb] p-4">
                 <p className="text-[13px] font-semibold text-[#253a30]">
                   Recipe card preview
                 </p>
@@ -177,13 +200,33 @@ export function RecipePersonaliser({
                 </p>
               </div>
 
+              {dishTweaks.length > 0 && (
+                <div className="mt-4 rounded-xl border border-[#dce2d7] bg-[#fbf8f0] p-4">
+                  <p className="text-[12px] font-semibold text-[#253a30]">
+                    Saved recipe tweak history
+                  </p>
+                  <ul className="mt-2 space-y-1.5 text-[12px] text-[#5d6c60] tabular-nums">
+                    {dishTweaks.slice(0, 3).map((item) => (
+                      <li key={item.id}>
+                        <span className="font-semibold text-[#253a30]">
+                          v{item.version}
+                        </span>{' '}
+                        · Sugar {formatTsp(item.sugar)} · Chilli{' '}
+                        {formatTsp(item.spice)} · Oil {formatTsp(item.oil)} tsp
+                        {item.tweakNote ? ` — "${item.tweakNote}"` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
                 <button
                   type="button"
                   onClick={onOrderRecipe}
-                  className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
+                  className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white tabular-nums transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
                 >
-                  Order food · $9.50
+                  Order food · {activeMeal.priceLabel}
                   <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
                 </button>
 
@@ -192,14 +235,9 @@ export function RecipePersonaliser({
                   onClick={onSaveRecipe}
                   className="inline-flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-full border border-[#dce2d7] bg-[#fbf8f0] px-5 py-3 text-[14px] font-semibold text-[#253a30] transition-colors duration-150 hover:bg-[#e7ecdf] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
                 >
-                  Save my recipe
+                  Save tweak
                 </button>
               </div>
-
-              <p className="mt-3 text-[12px] text-[#5d6c60]">
-                Demo only: saving stores this sample in your browser, not a
-                customer account.
-              </p>
             </div>
           </div>
         </div>

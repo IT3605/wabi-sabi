@@ -14,13 +14,17 @@ import {
   STORAGE_KEY,
   formatPrice,
   type DishId,
+  type MealOption,
   type RecipeState,
 } from './data/meals';
 import {
+  fetchMenuPrices,
   getSavedCustomerProfile,
   recallCustomerData,
-  saveRememberedRecipe,
+  saveRecipeTweak,
+  verifyStripeSession,
   type OrderRecord,
+  type RecipeTweakItem,
 } from './lib/ordersRepository';
 
 const DEFAULT_MEAL = MEALS[2]; // Sweet & Sour Noodles
@@ -62,13 +66,19 @@ function getInitialRecipe(): RecipeState {
 }
 
 export default function App() {
+  const [meals, setMeals] = useState<MealOption[]>(MEALS);
   const [recipe, setRecipe] = useState<RecipeState>(getInitialRecipe);
+  const [tweakNote, setTweakNote] = useState('');
   const [rememberedByDish, setRememberedByDish] = useState<
     Partial<Record<DishId, RecipeState>>
   >({});
+  const [tweakHistory, setTweakHistory] = useState<RecipeTweakItem[]>([]);
   const [isOrderOpen, setIsOrderOpen] = useState(false);
+  const [verifiedOrder, setVerifiedOrder] = useState<OrderRecord | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+
+  const activeMeal = meals.find((m) => m.id === recipe.dishId) ?? meals[0];
 
   const notify = useCallback((message: string) => {
     setToastMessage(message);
@@ -77,7 +87,7 @@ export default function App() {
     }
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
-    }, 4000);
+    }, 4500);
   }, []);
 
   useEffect(() => {
@@ -88,25 +98,74 @@ export default function App() {
     };
   }, []);
 
+  // Hydrate dish prices from SQLite menu_prices table via Hono /api/menu
+  useEffect(() => {
+    let cancelled = false;
+    fetchMenuPrices()
+      .then((serverMeals) => {
+        if (!cancelled && serverMeals.length > 0) {
+          setMeals(serverMeals);
+        }
+      })
+      .catch(() => {
+        // Fallback to static meal catalog if offline
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load saved customer data from SQLite if returning
   useEffect(() => {
     const savedProfile = getSavedCustomerProfile();
     if (!savedProfile?.contact) return;
 
     let cancelled = false;
     recallCustomerData(savedProfile.contact)
-      .then(({ recipesByDish }) => {
-        if (cancelled || !recipesByDish) return;
+      .then(({ recipesByDish, tweaks }) => {
+        if (cancelled) return;
         setRememberedByDish(recipesByDish);
+        setTweakHistory(tweaks);
         setRecipe((prev) => recipesByDish[prev.dishId] ?? prev);
       })
       .catch(() => {
-        // Silently keep local fallback recipe if remote recall fails
+        // Keep default local recipe if server lookup fails
       });
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Handle return from live Stripe Checkout redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get('payment');
+    const sessionId = params.get('session_id');
+    const orderCode = params.get('order_code');
+
+    if (payment === 'success' && sessionId && orderCode) {
+      verifyStripeSession(sessionId, orderCode)
+        .then(({ paid, order }) => {
+          if (paid && order) {
+            setVerifiedOrder(order);
+            setIsOrderOpen(true);
+            notify(
+              `Stripe payment confirmed for ${order.orderCode} (${formatPrice(order.totalCents)}).`
+            );
+          }
+        })
+        .catch(() => {
+          notify('Payment received; verifying order details.');
+        })
+        .finally(() => {
+          window.history.replaceState({}, '', window.location.pathname);
+        });
+    } else if (payment === 'cancelled') {
+      notify('Stripe payment was cancelled. Your recipe draft is still ready.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [notify]);
 
   const selectDishState = (dishId: DishId) => {
     const remembered = rememberedByDish[dishId];
@@ -115,7 +174,7 @@ export default function App() {
       return;
     }
 
-    const meal = MEALS.find((m) => m.id === dishId);
+    const meal = meals.find((m) => m.id === dishId);
     if (!meal) return;
 
     setRecipe({
@@ -129,7 +188,7 @@ export default function App() {
   };
 
   const handleSelectDishFromMenu = (dishId: DishId) => {
-    const meal = MEALS.find((m) => m.id === dishId);
+    const meal = meals.find((m) => m.id === dishId);
     if (!meal) return;
 
     selectDishState(dishId);
@@ -143,6 +202,7 @@ export default function App() {
     if (dishId !== recipe.dishId) {
       selectDishState(dishId);
     }
+    setVerifiedOrder(null);
     setIsOrderOpen(true);
   };
 
@@ -158,21 +218,27 @@ export default function App() {
 
   const handleSaveRecipe = async () => {
     const savedProfile = getSavedCustomerProfile();
-    if (savedProfile?.contact) {
+    if (savedProfile?.contact && savedProfile?.name) {
       try {
-        const updated = await saveRememberedRecipe(savedProfile, recipe);
-        setRecipe(updated);
+        const result = await saveRecipeTweak({
+          customer: savedProfile,
+          recipe,
+          tweakNote,
+        });
+        setRecipe(result.recipe);
         setRememberedByDish((prev) => ({
           ...prev,
-          [updated.dishId]: updated,
+          [result.recipe.dishId]: result.recipe,
         }));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        setTweakHistory(result.tweaks);
+        setTweakNote('');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(result.recipe));
         notify(
-          `Saved ${updated.dishName} (Version ${updated.version}) for future orders.`
+          `Saved ${result.recipe.dishName} tweak (Version ${result.recipe.version}) to database.`
         );
         return;
       } catch {
-        // Fallback to local save below
+        // Fallback to local draft below if server error
       }
     }
 
@@ -189,15 +255,15 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextRecipe));
       notify(
-        `Saved ${nextRecipe.dishName} (Version ${nextRecipe.version}) in this browser.`
+        `Drafted ${nextRecipe.dishName} (Version ${nextRecipe.version}). Enter your contact when ordering to store tweaks to your profile.`
       );
     } catch {
-      notify('Recipe preview ready. Browser storage is unavailable.');
+      notify('Recipe preview ready.');
     }
   };
 
   const handleResetRecipe = () => {
-    const meal = MEALS.find((m) => m.id === recipe.dishId) ?? DEFAULT_MEAL;
+    const meal = meals.find((m) => m.id === recipe.dishId) ?? DEFAULT_MEAL;
     const resetState: RecipeState = {
       dishId: meal.id,
       dishName: meal.name,
@@ -207,28 +273,13 @@ export default function App() {
       version: 1,
     };
     setRecipe(resetState);
+    setTweakNote('');
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
-      // Ignore storage errors when unavailable
-    }
-    notify(`Reset ${meal.name} to standard recipe quantities.`);
-  };
-
-  const handleOrderConfirmed = (order: OrderRecord) => {
-    setRecipe(order.recipe);
-    setRememberedByDish((prev) => ({
-      ...prev,
-      [order.recipe.dishId]: order.recipe,
-    }));
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(order.recipe));
-    } catch {
       // Ignore storage errors
     }
-    notify(
-      `Order saved: ${order.quantity} × ${order.recipe.dishName} (${formatPrice(order.totalCents)}).`
-    );
+    notify(`Reset ${meal.name} to standard recipe quantities.`);
   };
 
   const handleLaunchInterest = () => {
@@ -239,23 +290,43 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#fbf8f0] text-[#253a30]">
-      <Header onOpenOrder={() => setIsOrderOpen(true)} />
+      <Header
+        orderPriceLabel={activeMeal.priceLabel}
+        onOpenOrder={() => {
+          setVerifiedOrder(null);
+          setIsOrderOpen(true);
+        }}
+      />
 
       <main>
-        <Hero onOpenOrder={() => setIsOrderOpen(true)} />
+        <Hero
+          orderPriceLabel={activeMeal.priceLabel}
+          onOpenOrder={() => {
+            setVerifiedOrder(null);
+            setIsOrderOpen(true);
+          }}
+        />
         <HowItWorks />
         <MealsSection
+          meals={meals}
           selectedDishId={recipe.dishId}
           onSelectDish={handleSelectDishFromMenu}
           onOrderDish={handleOrderDish}
         />
         <RecipePersonaliser
+          meals={meals}
           recipe={recipe}
+          tweakNote={tweakNote}
+          tweakHistory={tweakHistory}
+          onChangeTweakNote={setTweakNote}
           onChangeDish={selectDishState}
           onUpdateField={handleUpdateField}
           onSaveRecipe={handleSaveRecipe}
           onResetRecipe={handleResetRecipe}
-          onOrderRecipe={() => setIsOrderOpen(true)}
+          onOrderRecipe={() => {
+            setVerifiedOrder(null);
+            setIsOrderOpen(true);
+          }}
         />
         <PhilosophySection />
         <LaunchBanner onLaunchInterest={handleLaunchInterest} />
@@ -265,22 +336,50 @@ export default function App() {
 
       <OrderModal
         isOpen={isOrderOpen}
+        meals={meals}
         recipe={recipe}
-        onClose={() => setIsOrderOpen(false)}
+        tweakNote={tweakNote}
+        initialConfirmedOrder={verifiedOrder}
+        onChangeTweakNote={setTweakNote}
+        onClose={() => {
+          setVerifiedOrder(null);
+          setIsOrderOpen(false);
+        }}
         onSelectDish={selectDishState}
-        onRecipeRecalled={(recalled) => {
-          setRecipe(recalled);
-          setRememberedByDish((prev) => ({
-            ...prev,
-            [recalled.dishId]: recalled,
-          }));
+        onCustomerLoaded={({ recipesByDish, tweaks }) => {
+          setRememberedByDish(recipesByDish);
+          setTweakHistory(tweaks);
+          const match = recipesByDish[recipe.dishId];
+          if (match) {
+            setRecipe(match);
+          }
         }}
         onJumpToPersonalise={() => {
           document
             .getElementById('personalise')
             ?.scrollIntoView({ behavior: 'smooth' });
         }}
-        onOrderConfirmed={handleOrderConfirmed}
+        onOrderCompleted={({ order, recipe: savedRecipe, tweaks }) => {
+          setRecipe(savedRecipe);
+          setRememberedByDish((prev) => ({
+            ...prev,
+            [savedRecipe.dishId]: savedRecipe,
+          }));
+          if (tweaks.length > 0) {
+            setTweakHistory(tweaks);
+          }
+          setTweakNote('');
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(savedRecipe));
+          } catch {
+            // Ignore storage errors
+          }
+          if (order.paymentStatus === 'paid') {
+            notify(
+              `Order ${order.orderCode} paid (${formatPrice(order.totalCents)}). Recipe v${savedRecipe.version} saved.`
+            );
+          }
+        }}
       />
 
       <Toast

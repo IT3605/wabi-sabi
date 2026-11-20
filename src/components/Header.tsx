@@ -9,10 +9,11 @@ const NAV_LINKS = [
 ];
 
 interface HeaderProps {
+  orderPriceLabel: string;
   onOpenOrder: () => void;
 }
 
-export function Header({ onOpenOrder }: HeaderProps) {
+export function Header({ orderPriceLabel, onOpenOrder }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -49,7 +50,7 @@ export function Header({ onOpenOrder }: HeaderProps) {
             onClick={onOpenOrder}
             className="hidden min-h-[40px] items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-full bg-[#253a30] px-5 py-2 text-[13px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30] sm:inline-flex"
           >
-            Order food · $9.50
+            Order food · {orderPriceLabel}
             <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
 
@@ -94,7 +95,7 @@ export function Header({ onOpenOrder }: HeaderProps) {
               }}
               className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-[#253a30] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#3a594a]"
             >
-              Order food · $9.50
+              Order food · {orderPriceLabel}
               <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>

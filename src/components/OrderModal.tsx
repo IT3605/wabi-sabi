@@ -1,6 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
+  ArrowLeft,
   Check,
+  CreditCard,
+  ExternalLink,
   Minus,
   Plus,
   RotateCcw,
@@ -8,29 +11,43 @@ import {
   X,
 } from 'lucide-react';
 import {
-  MEALS,
-  MEAL_PRICE_CENTS,
   formatPrice,
   formatTsp,
   type DishId,
+  type MealOption,
   type RecipeState,
 } from '../data/meals';
 import {
+  confirmDemoStripePayment,
+  createCheckoutOrder,
   getSavedCustomerProfile,
   recallCustomerData,
-  submitMealOrder,
   type OrderRecord,
+  type RecipeTweakItem,
 } from '../lib/ordersRepository';
 import { MealIllustration } from './Illustrations';
 
 interface OrderModalProps {
   isOpen: boolean;
+  meals: MealOption[];
   recipe: RecipeState;
+  tweakNote: string;
+  initialConfirmedOrder?: OrderRecord | null;
+  onChangeTweakNote: (note: string) => void;
   onClose: () => void;
   onSelectDish: (dishId: DishId) => void;
-  onRecipeRecalled: (recipe: RecipeState) => void;
+  onCustomerLoaded: (payload: {
+    recipesByDish: Partial<Record<DishId, RecipeState>>;
+    tweaks: RecipeTweakItem[];
+    orders: OrderRecord[];
+  }) => void;
   onJumpToPersonalise: () => void;
-  onOrderConfirmed: (order: OrderRecord) => void;
+  onOrderCompleted: (payload: {
+    order: OrderRecord;
+    recipe: RecipeState;
+    tweaks: RecipeTweakItem[];
+    orders: OrderRecord[];
+  }) => void;
 }
 
 const DELIVERY_SLOTS = [
@@ -39,15 +56,22 @@ const DELIVERY_SLOTS = [
   'Tomorrow · Dinner (18:30 – 19:30)',
 ];
 
+type ModalStep = 'details' | 'stripe_redirect' | 'stripe_demo' | 'confirmed';
+
 export function OrderModal({
   isOpen,
+  meals,
   recipe,
+  tweakNote,
+  initialConfirmedOrder,
+  onChangeTweakNote,
   onClose,
   onSelectDish,
-  onRecipeRecalled,
+  onCustomerLoaded,
   onJumpToPersonalise,
-  onOrderConfirmed,
+  onOrderCompleted,
 }: OrderModalProps) {
+  const [step, setStep] = useState<ModalStep>('details');
   const [quantity, setQuantity] = useState(1);
   const [deliverySlot, setDeliverySlot] = useState(DELIVERY_SLOTS[0]);
   const [customerName, setCustomerName] = useState('');
@@ -60,22 +84,40 @@ export function OrderModal({
     contact?: string;
     address?: string;
     postal?: string;
+    card?: string;
     submit?: string;
   }>({});
   const [recallFeedback, setRecallFeedback] = useState<string | null>(null);
   const [isRecalling, setIsRecalling] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submittedOrder, setSubmittedOrder] = useState<OrderRecord | null>(
+
+  // Stripe state
+  const [pendingOrder, setPendingOrder] = useState<OrderRecord | null>(null);
+  const [stripeCheckoutUrl, setStripeCheckoutUrl] = useState<string | null>(
     null
   );
+  const [cardNumber, setCardNumber] = useState('4242 4242 4242 4242');
+  const [cardExpiry, setCardExpiry] = useState('12/28');
+  const [cardCvc, setCardCvc] = useState('424');
+  const [confirmedOrder, setConfirmedOrder] = useState<OrderRecord | null>(
+    null
+  );
+  const [pastOrders, setPastOrders] = useState<OrderRecord[]>([]);
   const [imageError, setImageError] = useState(false);
 
-  const selectedMeal = MEALS.find((m) => m.id === recipe.dishId) ?? MEALS[0];
-  const totalCents = MEAL_PRICE_CENTS * quantity;
+  const selectedMeal = meals.find((m) => m.id === recipe.dishId) ?? meals[0];
+  const totalCents = selectedMeal.priceCents * quantity;
 
   useEffect(() => {
     setImageError(false);
   }, [selectedMeal.id]);
+
+  useEffect(() => {
+    if (initialConfirmedOrder) {
+      setConfirmedOrder(initialConfirmedOrder);
+      setStep('confirmed');
+    }
+  }, [initialConfirmedOrder]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -102,7 +144,10 @@ export function OrderModal({
   if (!isOpen) return null;
 
   const handleClose = () => {
-    setSubmittedOrder(null);
+    setStep('details');
+    setPendingOrder(null);
+    setStripeCheckoutUrl(null);
+    setConfirmedOrder(null);
     setErrors({});
     setRecallFeedback(null);
     onClose();
@@ -130,19 +175,33 @@ export function OrderModal({
         setPostalCode(result.profile.postalCode);
       }
 
+      setPastOrders(result.orders);
+      onCustomerLoaded({
+        recipesByDish: result.recipesByDish,
+        tweaks: result.tweaks,
+        orders: result.orders,
+      });
+
       const dishRecipe = result.recipesByDish[selectedMeal.id];
-      if (dishRecipe) {
-        onRecipeRecalled(dishRecipe);
+      if (result.masked && dishRecipe) {
         setRecallFeedback(
-          `Loaded your saved ${selectedMeal.name} recipe (Version ${dishRecipe.version}).`
+          `Loaded saved ${selectedMeal.name} seasoning ratios (Version ${dishRecipe.version}). Delivery address is protected on new devices—please enter your address to order.`
+        );
+      } else if (result.masked) {
+        setRecallFeedback(
+          'Found saved recipe preferences for this contact. Delivery address is protected on new devices—please enter your address to order.'
+        );
+      } else if (dishRecipe) {
+        setRecallFeedback(
+          `Loaded ${result.profile?.name ?? 'your'} saved ${selectedMeal.name} recipe (Version ${dishRecipe.version}) and ${result.orders.length} past order(s).`
         );
       } else if (result.profile) {
         setRecallFeedback(
-          `Loaded delivery details for ${result.profile.name}. Customise ${selectedMeal.name} below or adjust before ordering.`
+          `Loaded delivery details for ${result.profile.name}. Customise ${selectedMeal.name} and your tweak will be saved with this order.`
         );
       } else {
         setRecallFeedback(
-          'No previous recipe found for this contact yet. Your current customisation will be saved with this order.'
+          'No previous orders found for this contact yet. Your details and recipe will be saved when you order.'
         );
       }
     } catch {
@@ -152,7 +211,7 @@ export function OrderModal({
     }
   };
 
-  const handleSubmit = async (event: FormEvent) => {
+  const handleCheckoutSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const nextErrors: typeof errors = {};
 
@@ -185,7 +244,7 @@ export function OrderModal({
     setIsSubmitting(true);
 
     try {
-      const order = await submitMealOrder({
+      const result = await createCheckoutOrder({
         customer: {
           name: customerName.trim(),
           contact: contactVal,
@@ -196,16 +255,76 @@ export function OrderModal({
         quantity,
         deliverySlot,
         deliveryNotes: notes.trim(),
+        tweakNote: tweakNote.trim(),
       });
 
-      setSubmittedOrder(order);
-      onOrderConfirmed(order);
+      setPendingOrder(result.order);
+      setPastOrders(result.orders);
+      onOrderCompleted({
+        order: result.order,
+        recipe: result.recipe,
+        tweaks: result.tweaks,
+        orders: result.orders,
+      });
+
+      if (result.mode === 'stripe' && result.checkoutUrl) {
+        setStripeCheckoutUrl(result.checkoutUrl);
+        if (window.top === window.self) {
+          window.location.assign(result.checkoutUrl);
+          return;
+        }
+        setStep('stripe_redirect');
+      } else {
+        setStep('stripe_demo');
+      }
     } catch (err) {
       setErrors({
         submit:
           err instanceof Error
             ? err.message
-            : 'Unable to submit your order right now.',
+            : 'Unable to initiate checkout right now.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmDemoPayment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!pendingOrder) return;
+
+    const cleanCard = cardNumber.replace(/\s+/g, '');
+    if (cleanCard.length < 13 || !/^\d+$/.test(cleanCard)) {
+      setErrors({ card: 'Enter a valid test card number (e.g. 4242 4242 4242 4242).' });
+      return;
+    }
+    if (!/^\d{2}\/\d{2}$/.test(cardExpiry.trim()) || cardCvc.trim().length < 3) {
+      setErrors({ card: 'Enter valid expiry (MM/YY) and 3-digit CVC.' });
+      return;
+    }
+
+    setErrors({});
+    setIsSubmitting(true);
+
+    try {
+      const paidOrder = await confirmDemoStripePayment(
+        pendingOrder.orderCode,
+        pendingOrder.customer
+      );
+      setConfirmedOrder(paidOrder);
+      setStep('confirmed');
+      onOrderCompleted({
+        order: paidOrder,
+        recipe: paidOrder.recipe,
+        tweaks: [],
+        orders: pastOrders.map((o) =>
+          o.orderCode === paidOrder.orderCode ? paidOrder : o
+        ),
+      });
+    } catch (err) {
+      setErrors({
+        card:
+          err instanceof Error ? err.message : 'Unable to process payment.',
       });
     } finally {
       setIsSubmitting(false);
@@ -236,7 +355,11 @@ export function OrderModal({
               id="order-modal-title"
               className="mt-1 font-serif text-[28px] leading-tight font-semibold text-[#253a30]"
             >
-              {submittedOrder ? 'Order & recipe saved' : 'Order your meal'}
+              {step === 'confirmed'
+                ? 'Payment confirmed'
+                : step === 'stripe_demo' || step === 'stripe_redirect'
+                  ? 'Pay with Stripe'
+                  : 'Order your meal'}
             </h2>
           </div>
 
@@ -250,7 +373,7 @@ export function OrderModal({
           </button>
         </div>
 
-        {submittedOrder ? (
+        {step === 'confirmed' && confirmedOrder ? (
           <div className="mt-6 space-y-5">
             <div className="rounded-2xl border border-[#dce2d7] bg-white p-5">
               <div className="flex items-start justify-between gap-3">
@@ -260,16 +383,17 @@ export function OrderModal({
                   </span>
                   <div>
                     <p className="text-[15px] font-semibold text-[#253a30]">
-                      {submittedOrder.quantity} × {submittedOrder.recipe.dishName}
+                      {confirmedOrder.quantity} × {confirmedOrder.recipe.dishName}
                     </p>
                     <p className="text-[13px] text-[#5d6c60]">
-                      {submittedOrder.deliverySlot}
+                      Order {confirmedOrder.orderCode} · Paid via Stripe ·{' '}
+                      {confirmedOrder.deliverySlot}
                     </p>
                   </div>
                 </div>
 
                 <span className="text-[15px] font-semibold text-[#253a30] tabular-nums">
-                  {formatPrice(submittedOrder.totalCents)}
+                  {formatPrice(confirmedOrder.totalCents)}
                 </span>
               </div>
 
@@ -278,34 +402,35 @@ export function OrderModal({
                   <span className="font-semibold text-[#253a30]">
                     Deliver to:
                   </span>{' '}
-                  {submittedOrder.customer.name} ({submittedOrder.customer.contact})
+                  {confirmedOrder.customer.name} (
+                  {confirmedOrder.customer.contact})
                 </p>
                 <p>
-                  {submittedOrder.customer.address}, Singapore{' '}
-                  {submittedOrder.customer.postalCode}
+                  {confirmedOrder.customer.address}, Singapore{' '}
+                  {confirmedOrder.customer.postalCode}
                 </p>
               </div>
 
               <div className="mt-4 border-t border-[#dce2d7] pt-4 text-[13px] text-[#5d6c60] tabular-nums">
                 <p className="font-semibold text-[#253a30]">
-                  Saved recipe for future orders · Version{' '}
-                  {submittedOrder.recipe.version}
+                  Saved recipe · Version {confirmedOrder.recipe.version}
                 </p>
                 <p className="mt-1">
-                  Sugar: {formatTsp(submittedOrder.recipe.sugar)} tsp · Chilli:{' '}
-                  {formatTsp(submittedOrder.recipe.spice)} tsp · Oil:{' '}
-                  {formatTsp(submittedOrder.recipe.oil)} tsp
+                  Sugar: {formatTsp(confirmedOrder.recipe.sugar)} tsp · Chilli:{' '}
+                  {formatTsp(confirmedOrder.recipe.spice)} tsp · Oil:{' '}
+                  {formatTsp(confirmedOrder.recipe.oil)} tsp
                 </p>
               </div>
             </div>
 
             <p className="text-[13px] leading-relaxed text-[#5d6c60]">
-              Your tailored recipe has been saved under{' '}
+              Your customer record, order, and recipe version have been saved
+              in the database under{' '}
               <span className="font-medium text-[#253a30]">
-                {submittedOrder.customer.contact}
+                {confirmedOrder.customer.contact}
               </span>{' '}
-              so future orders can start from Version{' '}
-              {submittedOrder.recipe.version} and refine from there.
+              so future reorders start from Version{' '}
+              {confirmedOrder.recipe.version}.
             </p>
 
             <button
@@ -316,8 +441,131 @@ export function OrderModal({
               Done
             </button>
           </div>
+        ) : step === 'stripe_redirect' && stripeCheckoutUrl && pendingOrder ? (
+          <div className="mt-6 space-y-5">
+            <div className="rounded-2xl border border-[#dce2d7] bg-white p-5">
+              <p className="text-[14px] font-semibold text-[#253a30]">
+                Order {pendingOrder.orderCode} saved ·{' '}
+                {formatPrice(pendingOrder.totalCents)} SGD
+              </p>
+              <p className="mt-2 text-[13px] leading-relaxed text-[#5d6c60]">
+                Your customer details and recipe (Version{' '}
+                {pendingOrder.recipe.version}) are saved. Continue to Stripe
+                Checkout to complete your card payment.
+              </p>
+            </div>
+
+            <a
+              href={stripeCheckoutUrl}
+              target="_top"
+              className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white tabular-nums transition-colors hover:bg-[#3a594a]"
+            >
+              Continue to Stripe Checkout ·{' '}
+              {formatPrice(pendingOrder.totalCents)}
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+          </div>
+        ) : step === 'stripe_demo' && pendingOrder ? (
+          <form
+            onSubmit={handleConfirmDemoPayment}
+            noValidate
+            className="mt-6 space-y-5"
+          >
+            <div className="rounded-2xl border border-[#dce2d7] bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[14px] font-semibold text-[#253a30]">
+                    {pendingOrder.quantity} × {pendingOrder.recipe.dishName}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-[#5d6c60]">
+                    Order {pendingOrder.orderCode} · Recipe v
+                    {pendingOrder.recipe.version}
+                  </p>
+                </div>
+                <span className="text-[18px] font-semibold text-[#253a30] tabular-nums">
+                  {formatPrice(pendingOrder.totalCents)}
+                </span>
+              </div>
+
+              <div className="mt-5 space-y-3 border-t border-[#dce2d7] pt-4">
+                <div className="flex items-center gap-2 text-[13px] font-semibold text-[#253a30]">
+                  <CreditCard className="h-4 w-4" aria-hidden="true" />
+                  <span>Stripe card checkout (Test mode)</span>
+                </div>
+
+                <label className="block text-[12px] font-medium text-[#5d6c60]">
+                  Card number
+                  <input
+                    type="text"
+                    value={cardNumber}
+                    onChange={(e) => setCardNumber(e.target.value)}
+                    className="mt-1 min-h-[42px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] text-[#253a30] tabular-nums focus:border-[#253a30] focus:outline-none"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-[12px] font-medium text-[#5d6c60]">
+                    Expiry (MM/YY)
+                    <input
+                      type="text"
+                      value={cardExpiry}
+                      onChange={(e) => setCardExpiry(e.target.value)}
+                      className="mt-1 min-h-[42px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] text-[#253a30] tabular-nums focus:border-[#253a30] focus:outline-none"
+                    />
+                  </label>
+
+                  <label className="block text-[12px] font-medium text-[#5d6c60]">
+                    CVC
+                    <input
+                      type="text"
+                      maxLength={4}
+                      value={cardCvc}
+                      onChange={(e) => setCardCvc(e.target.value)}
+                      className="mt-1 min-h-[42px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] text-[#253a30] tabular-nums focus:border-[#253a30] focus:outline-none"
+                    />
+                  </label>
+                </div>
+
+                {errors.card && (
+                  <p className="text-[12px] font-medium text-[#9d5738]">
+                    {errors.card}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setStep('details')}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-[#dce2d7] bg-white px-5 py-3 text-[14px] font-semibold text-[#253a30] transition-colors hover:bg-[#e7ecdf]"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Back
+              </button>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white tabular-nums transition-colors hover:bg-[#3a594a] disabled:opacity-60"
+              >
+                {isSubmitting
+                  ? 'Confirming payment...'
+                  : `Pay ${formatPrice(pendingOrder.totalCents)} with Stripe`}
+              </button>
+            </div>
+
+            <p className="text-center text-[12px] text-[#5d6c60]">
+              Running in Stripe test-card preview mode. Add `STRIPE_SECRET_KEY`
+              in your server environment for live Stripe Checkout Sessions.
+            </p>
+          </form>
         ) : (
-          <form onSubmit={handleSubmit} noValidate className="mt-5 space-y-4">
+          <form
+            onSubmit={handleCheckoutSubmit}
+            noValidate
+            className="mt-5 space-y-4"
+          >
             {/* Dish summary & selector */}
             <div className="flex flex-col gap-4 rounded-2xl border border-[#dce2d7] bg-white p-4 sm:flex-row sm:items-center">
               <div className="h-24 w-full shrink-0 overflow-hidden rounded-xl bg-[#eef0e7] sm:w-32">
@@ -344,7 +592,7 @@ export function OrderModal({
                     onChange={(e) => onSelectDish(e.target.value as DishId)}
                     className="mt-1 min-h-[40px] w-full rounded-[10px] border border-[#dce2d7] bg-[#fbfaf6] px-3 py-2 text-[14px] font-semibold text-[#253a30] focus:border-[#253a30] focus:outline-none"
                   >
-                    {MEALS.map((meal) => (
+                    {meals.map((meal) => (
                       <option key={meal.id} value={meal.id}>
                         {meal.name} ({meal.priceLabel})
                       </option>
@@ -523,16 +771,29 @@ export function OrderModal({
               </label>
             </div>
 
-            <label className="block text-[13px] font-medium text-[#253a30]">
-              Delivery note (optional)
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Leave at door, no utensils needed, etc."
-                className="mt-1.5 min-h-[44px] w-full rounded-[12px] border border-[#dce2d7] bg-white px-3.5 py-2 text-[14px] font-normal text-[#253a30] placeholder:text-[#5d6c60]/60 focus:border-[#253a30] focus:outline-none"
-              />
-            </label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="block text-[13px] font-medium text-[#253a30]">
+                Recipe tweak note (optional)
+                <input
+                  type="text"
+                  value={tweakNote}
+                  onChange={(e) => onChangeTweakNote(e.target.value)}
+                  placeholder="e.g. Lighter gravy next time"
+                  className="mt-1.5 min-h-[44px] w-full rounded-[12px] border border-[#dce2d7] bg-white px-3.5 py-2 text-[14px] font-normal text-[#253a30] placeholder:text-[#5d6c60]/60 focus:border-[#253a30] focus:outline-none"
+                />
+              </label>
+
+              <label className="block text-[13px] font-medium text-[#253a30]">
+                Delivery note (optional)
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Leave at door, no utensils"
+                  className="mt-1.5 min-h-[44px] w-full rounded-[12px] border border-[#dce2d7] bg-white px-3.5 py-2 text-[14px] font-normal text-[#253a30] placeholder:text-[#5d6c60]/60 focus:border-[#253a30] focus:outline-none"
+                />
+              </label>
+            </div>
 
             {errors.submit && (
               <p className="rounded-xl border border-[#d47b52] bg-[#d47b52]/10 px-3.5 py-2.5 text-[13px] font-medium text-[#9d5738]">
@@ -547,12 +808,12 @@ export function OrderModal({
                 className="inline-flex min-h-[44px] w-full items-center justify-center rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white tabular-nums transition-colors duration-150 hover:bg-[#3a594a] disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
               >
                 {isSubmitting
-                  ? 'Saving order & recipe...'
-                  : `Place order · ${formatPrice(totalCents)}`}
+                  ? 'Saving order...'
+                  : `Continue to Stripe · ${formatPrice(totalCents)}`}
               </button>
               <p className="mt-2.5 text-center text-[12px] text-[#5d6c60]">
-                Your tailored recipe is saved with your contact for future
-                reorders and refinements.
+                Saves your contact, order, and tailored recipe tweaks for future
+                reorders.
               </p>
             </div>
           </form>

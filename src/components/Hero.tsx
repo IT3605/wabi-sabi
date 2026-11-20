@@ -5,10 +5,11 @@ import { HeroMealIllustration } from './Illustrations';
 const HERO_IMAGE_SRC = '/src/assets/images/hero_wabi_sabi_meal_1795162138881.jpg';
 
 interface HeroProps {
+  orderPriceLabel: string;
   onOpenOrder: () => void;
 }
 
-export function Hero({ onOpenOrder }: HeroProps) {
+export function Hero({ orderPriceLabel, onOpenOrder }: HeroProps) {
   const [imageError, setImageError] = useState(false);
 
   return (
@@ -38,7 +39,7 @@ export function Hero({ onOpenOrder }: HeroProps) {
               onClick={onOpenOrder}
               className="inline-flex min-h-[44px] items-center justify-center gap-2 whitespace-nowrap shrink-0 rounded-full bg-[#253a30] px-6 py-3 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#3a594a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#253a30]"
             >
-              Order food · $9.50
+              Order food · {orderPriceLabel}
               <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
             </button>
 

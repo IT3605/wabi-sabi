@@ -1,12 +1,11 @@
 import {
   CUSTOMER_PROFILE_STORAGE_KEY,
-  CUSTOMER_RECIPES_STORAGE_KEY,
-  MEAL_PRICE_CENTS,
-  ORDERS_STORAGE_KEY,
+  MEALS,
+  formatPrice,
   type DishId,
+  type MealOption,
   type RecipeState,
 } from '../data/meals';
-import { getSupabaseClient } from './supabase';
 
 export interface CustomerProfile {
   name: string;
@@ -15,16 +14,20 @@ export interface CustomerProfile {
   postalCode: string;
 }
 
-export interface SubmitOrderInput {
-  customer: CustomerProfile;
-  recipe: RecipeState;
-  quantity: number;
-  deliverySlot: string;
-  deliveryNotes: string;
+export interface RecipeTweakItem {
+  id: number;
+  dishId: DishId;
+  version: number;
+  sugar: string;
+  spice: string;
+  oil: string;
+  tweakNote: string;
+  source: string;
+  createdAt: string;
 }
 
 export interface OrderRecord {
-  id: string;
+  orderCode: string;
   customer: CustomerProfile;
   recipe: RecipeState;
   quantity: number;
@@ -32,255 +35,367 @@ export interface OrderRecord {
   totalCents: number;
   deliverySlot: string;
   deliveryNotes: string;
+  paymentProvider: string;
+  paymentStatus: 'pending' | 'paid';
   createdAt: string;
 }
 
-interface StoredCustomerRecipeRow {
-  customer_contact: string;
-  customer_name: string;
-  delivery_address: string;
+interface ApiMenuPriceRow {
+  dish_id: DishId;
+  dish_name: string;
+  subtitle: string;
+  description: string;
+  price_cents: number;
+}
+
+interface ApiCustomerRow {
+  id: number;
+  name: string;
+  contact: string;
+  display_contact: string;
+  address: string;
   postal_code: string;
+}
+
+interface ApiRecipeRow {
   dish_id: DishId;
   dish_name: string;
   sweetness_tsp: number;
   spice_tsp: number;
   oil_tsp: number;
   version: number;
-  updated_at: string;
 }
 
-export function normalizeContact(raw: string): string {
-  const trimmed = raw.trim().toLowerCase();
-  if (trimmed.includes('@')) {
-    return trimmed;
-  }
-  return trimmed.replace(/[\s\-()]/g, '');
+interface ApiTweakRow {
+  id: number;
+  dish_id: DishId;
+  version: number;
+  sweetness_tsp: number;
+  spice_tsp: number;
+  oil_tsp: number;
+  tweak_note: string;
+  source: string;
+  created_at: string;
 }
 
-function readLocalJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
+interface ApiOrderRow {
+  order_code: string;
+  dish_id: DishId;
+  dish_name: string;
+  quantity: number;
+  unit_price_cents: number;
+  total_cents: number;
+  sweetness_tsp: number;
+  spice_tsp: number;
+  oil_tsp: number;
+  recipe_version: number;
+  delivery_slot: string;
+  delivery_notes: string;
+  payment_provider: string;
+  payment_status: 'pending' | 'paid';
+  created_at: string;
+  customer_name?: string;
+  customer_contact?: string;
+  delivery_address?: string;
+  postal_code?: string;
 }
 
-function writeLocalJson<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Ignore storage quota or privacy-mode errors
+function mapRecipe(row: ApiRecipeRow): RecipeState {
+  return {
+    dishId: row.dish_id,
+    dishName: row.dish_name,
+    sugar: String(Number(row.sweetness_tsp)),
+    spice: String(Number(row.spice_tsp)),
+    oil: String(Number(row.oil_tsp)),
+    version: row.version,
+  };
+}
+
+function mapTweak(row: ApiTweakRow): RecipeTweakItem {
+  return {
+    id: row.id,
+    dishId: row.dish_id,
+    version: row.version,
+    sugar: String(Number(row.sweetness_tsp)),
+    spice: String(Number(row.spice_tsp)),
+    oil: String(Number(row.oil_tsp)),
+    tweakNote: row.tweak_note,
+    source: row.source,
+    createdAt: row.created_at,
+  };
+}
+
+function mapOrder(
+  row: ApiOrderRow,
+  fallbackCustomer: CustomerProfile
+): OrderRecord {
+  return {
+    orderCode: row.order_code,
+    customer: {
+      name: row.customer_name ?? fallbackCustomer.name,
+      contact: row.customer_contact ?? fallbackCustomer.contact,
+      address: row.delivery_address ?? fallbackCustomer.address,
+      postalCode: row.postal_code ?? fallbackCustomer.postalCode,
+    },
+    recipe: {
+      dishId: row.dish_id,
+      dishName: row.dish_name,
+      sugar: String(Number(row.sweetness_tsp)),
+      spice: String(Number(row.spice_tsp)),
+      oil: String(Number(row.oil_tsp)),
+      version: row.recipe_version,
+    },
+    quantity: row.quantity,
+    unitPriceCents: row.unit_price_cents,
+    totalCents: row.total_cents,
+    deliverySlot: row.delivery_slot,
+    deliveryNotes: row.delivery_notes,
+    paymentProvider: row.payment_provider,
+    paymentStatus: row.payment_status,
+    createdAt: row.created_at,
+  };
+}
+
+export async function fetchMenuPrices(): Promise<MealOption[]> {
+  const response = await fetch('/api/menu');
+  if (!response.ok) {
+    return MEALS;
   }
+
+  const data = (await response.json()) as { items?: ApiMenuPriceRow[] };
+  if (!data.items || data.items.length === 0) {
+    return MEALS;
+  }
+
+  return data.items.map((row) => {
+    const base = MEALS.find((m) => m.id === row.dish_id) ?? MEALS[0];
+    return {
+      ...base,
+      id: row.dish_id,
+      name: row.dish_name,
+      subtitle: row.subtitle,
+      description: row.description,
+      priceCents: row.price_cents,
+      priceLabel: formatPrice(row.price_cents),
+    };
+  });
 }
 
 export function getSavedCustomerProfile(): CustomerProfile | null {
-  return readLocalJson<CustomerProfile | null>(
-    CUSTOMER_PROFILE_STORAGE_KEY,
-    null
-  );
+  try {
+    const raw = localStorage.getItem(CUSTOMER_PROFILE_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CustomerProfile;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCustomerProfileLocally(profile: CustomerProfile): void {
+  try {
+    // Only persist non-sensitive display identifiers in localStorage;
+    // delivery address and postal code are protected by the HttpOnly ws_session cookie.
+    localStorage.setItem(
+      CUSTOMER_PROFILE_STORAGE_KEY,
+      JSON.stringify({
+        name: profile.name,
+        contact: profile.contact,
+        address: '',
+        postalCode: '',
+      })
+    );
+  } catch {
+    // Ignore storage errors
+  }
 }
 
 export async function recallCustomerData(contactRaw: string): Promise<{
   profile: CustomerProfile | null;
   recipesByDish: Partial<Record<DishId, RecipeState>>;
+  tweaks: RecipeTweakItem[];
+  orders: OrderRecord[];
+  masked: boolean;
 }> {
-  const normalizedContact = normalizeContact(contactRaw);
-  if (!normalizedContact) {
-    return { profile: null, recipesByDish: {} };
-  }
-
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('customer_recipes')
-      .select(
-        'customer_contact, customer_name, delivery_address, postal_code, dish_id, dish_name, sweetness_tsp, spice_tsp, oil_tsp, version, updated_at'
-      )
-      .eq('customer_contact', normalizedContact)
-      .order('updated_at', { ascending: false });
-
-    if (!error && data && data.length > 0) {
-      const rows = data as StoredCustomerRecipeRow[];
-      const latest = rows[0];
-      const profile: CustomerProfile = {
-        name: latest.customer_name,
-        contact: contactRaw.trim(),
-        address: latest.delivery_address,
-        postalCode: latest.postal_code,
-      };
-      const recipesByDish: Partial<Record<DishId, RecipeState>> = {};
-      for (const row of rows) {
-        recipesByDish[row.dish_id] = {
-          dishId: row.dish_id,
-          dishName: row.dish_name,
-          sugar: String(Number(row.sweetness_tsp)),
-          spice: String(Number(row.spice_tsp)),
-          oil: String(Number(row.oil_tsp)),
-          version: row.version,
-        };
-      }
-      return { profile, recipesByDish };
-    }
-  }
-
-  const localMap = readLocalJson<
-    Record<
-      string,
-      {
-        profile: CustomerProfile;
-        recipesByDish: Partial<Record<DishId, RecipeState>>;
-      }
-    >
-  >(CUSTOMER_RECIPES_STORAGE_KEY, {});
-
-  const entry = localMap[normalizedContact];
-  if (!entry) {
-    return { profile: null, recipesByDish: {} };
-  }
-  return entry;
-}
-
-export async function saveRememberedRecipe(
-  customer: CustomerProfile,
-  recipe: RecipeState
-): Promise<RecipeState> {
-  const normalizedContact = normalizeContact(customer.contact);
-  const existing = await recallCustomerData(normalizedContact);
-  const priorDish = existing.recipesByDish[recipe.dishId];
-
-  const isModifiedFromPrior =
-    !priorDish ||
-    priorDish.sugar !== recipe.sugar ||
-    priorDish.spice !== recipe.spice ||
-    priorDish.oil !== recipe.oil;
-
-  const nextVersion = priorDish
-    ? isModifiedFromPrior
-      ? priorDish.version + 1
-      : priorDish.version
-    : Math.max(1, recipe.version);
-
-  const updatedRecipe: RecipeState = {
-    ...recipe,
-    version: nextVersion,
-  };
-
-  const supabase = getSupabaseClient();
-  if (supabase && normalizedContact) {
-    const { error } = await supabase.from('customer_recipes').upsert(
-      {
-        customer_contact: normalizedContact,
-        customer_name: customer.name.trim(),
-        delivery_address: customer.address.trim(),
-        postal_code: customer.postalCode.trim(),
-        dish_id: updatedRecipe.dishId,
-        dish_name: updatedRecipe.dishName,
-        sweetness_tsp: Number(updatedRecipe.sugar),
-        spice_tsp: Number(updatedRecipe.spice),
-        oil_tsp: Number(updatedRecipe.oil),
-        version: updatedRecipe.version,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'customer_contact,dish_id' }
-    );
-
-    if (error) {
-      throw new Error('Could not save your tailored recipe right now.');
-    }
-  }
-
-  if (normalizedContact) {
-    const localMap = readLocalJson<
-      Record<
-        string,
-        {
-          profile: CustomerProfile;
-          recipesByDish: Partial<Record<DishId, RecipeState>>;
-        }
-      >
-    >(CUSTOMER_RECIPES_STORAGE_KEY, {});
-
-    const currentEntry = localMap[normalizedContact] ?? {
-      profile: customer,
-      recipesByDish: {},
-    };
-
-    localMap[normalizedContact] = {
-      profile: customer,
-      recipesByDish: {
-        ...currentEntry.recipesByDish,
-        [updatedRecipe.dishId]: updatedRecipe,
-      },
-    };
-    writeLocalJson(CUSTOMER_RECIPES_STORAGE_KEY, localMap);
-  }
-
-  writeLocalJson(CUSTOMER_PROFILE_STORAGE_KEY, customer);
-  return updatedRecipe;
-}
-
-export async function submitMealOrder(
-  input: SubmitOrderInput
-): Promise<OrderRecord> {
-  const rememberedRecipe = await saveRememberedRecipe(
-    input.customer,
-    input.recipe
+  const response = await fetch(
+    `/api/customers/recall?contact=${encodeURIComponent(contactRaw.trim())}`,
+    { credentials: 'same-origin' }
   );
-  const normalizedContact = normalizeContact(input.customer.contact);
-  const totalCents = MEAL_PRICE_CENTS * input.quantity;
-  const nowIso = new Date().toISOString();
-
-  const supabase = getSupabaseClient();
-  let orderId = `WS-${Date.now().toString().slice(-5)}`;
-
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('orders')
-      .insert({
-        customer_name: input.customer.name.trim(),
-        customer_contact: normalizedContact,
-        delivery_address: input.customer.address.trim(),
-        postal_code: input.customer.postalCode.trim(),
-        dish_id: rememberedRecipe.dishId,
-        dish_name: rememberedRecipe.dishName,
-        quantity: input.quantity,
-        unit_price_cents: MEAL_PRICE_CENTS,
-        total_cents: totalCents,
-        sweetness_tsp: Number(rememberedRecipe.sugar),
-        spice_tsp: Number(rememberedRecipe.spice),
-        oil_tsp: Number(rememberedRecipe.oil),
-        recipe_version: rememberedRecipe.version,
-        delivery_slot: input.deliverySlot,
-        delivery_notes: input.deliveryNotes.trim(),
-      })
-      .select('id')
-      .single();
-
-    if (error) {
-      throw new Error('Could not place your order. Please try again.');
-    }
-
-    if (data?.id) {
-      orderId = String(data.id).slice(0, 8).toUpperCase();
-    }
+  if (!response.ok) {
+    throw new Error('Could not recall saved customer details.');
   }
 
-  const record: OrderRecord = {
-    id: orderId,
-    customer: input.customer,
-    recipe: rememberedRecipe,
-    quantity: input.quantity,
-    unitPriceCents: MEAL_PRICE_CENTS,
-    totalCents,
-    deliverySlot: input.deliverySlot,
-    deliveryNotes: input.deliveryNotes.trim(),
-    createdAt: nowIso,
+  const data = (await response.json()) as {
+    customer: ApiCustomerRow | null;
+    recipes: ApiRecipeRow[];
+    tweaks: ApiTweakRow[];
+    orders: ApiOrderRow[];
+    masked?: boolean;
   };
 
-  const existingOrders = readLocalJson<OrderRecord[]>(ORDERS_STORAGE_KEY, []);
-  writeLocalJson(ORDERS_STORAGE_KEY, [record, ...existingOrders].slice(0, 20));
+  const recipesByDish: Partial<Record<DishId, RecipeState>> = {};
+  for (const r of data.recipes ?? []) {
+    recipesByDish[r.dish_id] = mapRecipe(r);
+  }
 
-  return record;
+  if (!data.customer) {
+    return {
+      profile: null,
+      recipesByDish,
+      tweaks: [],
+      orders: [],
+      masked: Boolean(data.masked),
+    };
+  }
+
+  const profile: CustomerProfile = {
+    name: data.customer.name,
+    contact: data.customer.display_contact,
+    address: data.customer.address,
+    postalCode: data.customer.postal_code,
+  };
+
+  return {
+    profile,
+    recipesByDish,
+    tweaks: data.tweaks.map(mapTweak),
+    orders: data.orders.map((o) => mapOrder(o, profile)),
+    masked: Boolean(data.masked),
+  };
+}
+
+export async function saveRecipeTweak(input: {
+  customer: CustomerProfile;
+  recipe: RecipeState;
+  tweakNote: string;
+}): Promise<{ recipe: RecipeState; tweaks: RecipeTweakItem[] }> {
+  const response = await fetch('/api/recipes/save', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      customer: input.customer,
+      dishId: input.recipe.dishId,
+      dishName: input.recipe.dishName,
+      sugar: input.recipe.sugar,
+      spice: input.recipe.spice,
+      oil: input.recipe.oil,
+      tweakNote: input.tweakNote,
+    }),
+  });
+
+  const data = (await response.json()) as {
+    error?: string;
+    recipe?: ApiRecipeRow;
+    tweaks?: ApiTweakRow[];
+  };
+
+  if (!response.ok || !data.recipe) {
+    throw new Error(data.error ?? 'Could not save your recipe tweak.');
+  }
+
+  return {
+    recipe: mapRecipe(data.recipe),
+    tweaks: (data.tweaks ?? []).map(mapTweak),
+  };
+}
+
+export async function createCheckoutOrder(input: {
+  customer: CustomerProfile;
+  recipe: RecipeState;
+  quantity: number;
+  deliverySlot: string;
+  deliveryNotes: string;
+  tweakNote: string;
+}): Promise<{
+  mode: 'stripe' | 'stripe_demo';
+  checkoutUrl?: string;
+  order: OrderRecord;
+  recipe: RecipeState;
+  tweaks: RecipeTweakItem[];
+  orders: OrderRecord[];
+}> {
+  const response = await fetch('/api/orders/checkout', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  const data = (await response.json()) as {
+    error?: string;
+    mode: 'stripe' | 'stripe_demo';
+    checkoutUrl?: string;
+    order: ApiOrderRow;
+    recipe: ApiRecipeRow;
+    tweaks: ApiTweakRow[];
+    orders: ApiOrderRow[];
+  };
+
+  if (!response.ok || !data.order) {
+    throw new Error(data.error ?? 'Could not start Stripe checkout.');
+  }
+
+  saveCustomerProfileLocally(input.customer);
+
+  return {
+    mode: data.mode,
+    checkoutUrl: data.checkoutUrl,
+    order: mapOrder(data.order, input.customer),
+    recipe: mapRecipe(data.recipe),
+    tweaks: (data.tweaks ?? []).map(mapTweak),
+    orders: (data.orders ?? []).map((o) => mapOrder(o, input.customer)),
+  };
+}
+
+export async function confirmDemoStripePayment(
+  orderCode: string,
+  fallbackCustomer: CustomerProfile
+): Promise<OrderRecord> {
+  const response = await fetch(
+    `/api/orders/${encodeURIComponent(orderCode)}/confirm-demo-payment`,
+    { method: 'POST', credentials: 'same-origin' }
+  );
+
+  const data = (await response.json()) as {
+    error?: string;
+    order?: ApiOrderRow;
+  };
+
+  if (!response.ok || !data.order) {
+    throw new Error(data.error ?? 'Could not confirm payment.');
+  }
+
+  return mapOrder(data.order, fallbackCustomer);
+}
+
+export async function verifyStripeSession(
+  sessionId: string,
+  orderCode: string
+): Promise<{ paid: boolean; order: OrderRecord | null }> {
+  const response = await fetch(
+    `/api/stripe/verify?session_id=${encodeURIComponent(sessionId)}&order_code=${encodeURIComponent(orderCode)}`,
+    { credentials: 'same-origin' }
+  );
+
+  const data = (await response.json()) as {
+    paid?: boolean;
+    order?: ApiOrderRow | null;
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(data.error ?? 'Unable to verify Stripe payment.');
+  }
+
+  const fallback: CustomerProfile = {
+    name: data.order?.customer_name ?? '',
+    contact: data.order?.customer_contact ?? '',
+    address: data.order?.delivery_address ?? '',
+    postalCode: data.order?.postal_code ?? '',
+  };
+
+  return {
+    paid: Boolean(data.paid),
+    order: data.order ? mapOrder(data.order, fallback) : null,
+  };
 }

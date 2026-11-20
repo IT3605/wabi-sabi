@@ -1,7 +1,5 @@
 export type DishId = 'curry-rice' | 'garden-bowl' | 'sweet-sour-noodles';
 
-export const MEAL_PRICE_CENTS = 950;
-
 export function formatPrice(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
@@ -43,8 +41,8 @@ export const MEALS: MealOption[] = [
     subtitle: 'Customisable · Comfort classic',
     description:
       'Comforting, aromatic, and tailored to your preferred spice level.',
-    priceCents: MEAL_PRICE_CENTS,
-    priceLabel: formatPrice(MEAL_PRICE_CENTS),
+    priceCents: 1050,
+    priceLabel: formatPrice(1050),
     defaultSugar: '1.5',
     defaultSpice: '0.5',
     defaultOil: '1.5',
@@ -59,8 +57,8 @@ export const MEALS: MealOption[] = [
     subtitle: 'Customisable · Seasonal harvest',
     description:
       'Seasonal vegetables, grains, and a dressing balanced to your taste.',
-    priceCents: MEAL_PRICE_CENTS,
-    priceLabel: formatPrice(MEAL_PRICE_CENTS),
+    priceCents: 950,
+    priceLabel: formatPrice(950),
     defaultSugar: '1.5',
     defaultSpice: '0',
     defaultOil: '1',
@@ -75,8 +73,8 @@ export const MEALS: MealOption[] = [
     subtitle: 'Customisable · Signature favourite',
     description:
       'A familiar favourite with your ideal balance of sweetness and tang.',
-    priceCents: MEAL_PRICE_CENTS,
-    priceLabel: formatPrice(MEAL_PRICE_CENTS),
+    priceCents: 890,
+    priceLabel: formatPrice(890),
     defaultSugar: '1.5',
     defaultSpice: '0.25',
     defaultOil: '1.5',

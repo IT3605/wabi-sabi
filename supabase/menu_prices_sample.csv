@@ -1,0 +1,4 @@
+dish_id,dish_name,subtitle,description,price_cents,currency,is_active,sort_order
+curry-rice,Homestyle Curry Rice,Customisable · Comfort classic,"Comforting, aromatic, and tailored to your preferred spice level.",1050,SGD,true,1
+garden-bowl,Garden Goodness Bowl,Customisable · Seasonal harvest,"Seasonal vegetables, grains, and a dressing balanced to your taste.",950,SGD,true,2
+sweet-sour-noodles,Sweet & Sour Noodles,Customisable · Signature favourite,"A familiar favourite with your ideal balance of sweetness and tang.",890,SGD,true,3

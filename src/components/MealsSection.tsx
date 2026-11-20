@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import { MEALS, type DishId } from '../data/meals';
+import type { DishId, MealOption } from '../data/meals';
 import { MealIllustration } from './Illustrations';
 
 interface MealsSectionProps {
+  meals: MealOption[];
   selectedDishId: DishId;
   onSelectDish: (dishId: DishId) => void;
   onOrderDish: (dishId: DishId) => void;
 }
 
 export function MealsSection({
+  meals,
   selectedDishId,
   onSelectDish,
   onOrderDish,
@@ -27,13 +29,13 @@ export function MealsSection({
             Everyday favourites, your way.
           </h2>
           <p className="mt-4 text-[16px] leading-[1.7] text-[#5d6c60]">
-            A sample menu to show how Wabi Sabi could work. Actual dishes and
-            prices will be announced at launch.
+            Tailored homestyle dishes priced by recipe. Customise any bowl or
+            order directly.
           </p>
         </div>
 
         <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
-          {MEALS.map((meal) => {
+          {meals.map((meal) => {
             const isActive = meal.id === selectedDishId;
             const hasFailed = Boolean(failedImages[meal.id]);
 
